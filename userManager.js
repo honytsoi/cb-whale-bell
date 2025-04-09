@@ -311,18 +311,35 @@ export function isWhale(username, thresholds) {
     if (!user || !user.tokenStats) { return false; }
     const stats = user.tokenStats;
     
+    console.group(`🐳 Whale Check for ${username}`);
+    console.log(`User stats:`, {
+        totalSpent: stats.totalSpent,
+        totalTips: stats.totalTips,
+        totalPrivates: stats.totalPrivates,
+        totalMedia: stats.totalMedia
+    });
+    
     // Check lifetime spending first (most common case)
+    console.log(`Lifetime spending check: ${stats.totalSpent} >= ${thresholds.lifetimeSpendingThreshold}`);
     if (stats.totalSpent >= thresholds.lifetimeSpendingThreshold) {
+        console.log(`✨ IS WHALE: Lifetime spending threshold met`);
+        console.groupEnd();
         return true;
     }
 
     // Check lifetime tips
+    console.log(`Lifetime tips check: ${stats.totalTips} >= ${thresholds.totalLifetimeTipsThreshold}`);
     if (stats.totalTips >= thresholds.totalLifetimeTipsThreshold) {
+        console.log(`✨ IS WHALE: Lifetime tips threshold met`);
+        console.groupEnd();
         return true;
     }
 
     // Check lifetime privates
+    console.log(`Lifetime privates check: ${stats.totalPrivates} >= ${thresholds.totalPrivatesThreshold}`);
     if (stats.totalPrivates >= thresholds.totalPrivatesThreshold) {
+        console.log(`✨ IS WHALE: Lifetime privates threshold met`);
+        console.groupEnd();
         return true;
     }
 
@@ -330,7 +347,11 @@ export function isWhale(username, thresholds) {
     const recentTipSeconds = thresholds.recentTipTimeframe;
     if (recentTipSeconds > 0) {
         const recentTipDays = Math.ceil(recentTipSeconds / 86400);
-        if (getSpentInPeriod(username, recentTipDays, 'tips') >= thresholds.recentTipThreshold) {
+        const recentTips = getSpentInPeriod(username, recentTipDays, 'tips');
+        console.log(`Recent tips check (${recentTipDays} days): ${recentTips} >= ${thresholds.recentTipThreshold}`);
+        if (recentTips >= thresholds.recentTipThreshold) {
+            console.log(`✨ IS WHALE: Recent tips threshold met`);
+            console.groupEnd();
             return true;
         }
     }
@@ -339,7 +360,11 @@ export function isWhale(username, thresholds) {
     const recentPrivateSeconds = thresholds.recentPrivateTimeframe;
     if (recentPrivateSeconds > 0) {
         const recentPrivateDays = Math.ceil(recentPrivateSeconds / 86400);
-        if (getSpentInPeriod(username, recentPrivateDays, 'privates') >= thresholds.recentPrivateThreshold) {
+        const recentPrivates = getSpentInPeriod(username, recentPrivateDays, 'privates');
+        console.log(`Recent privates check (${recentPrivateDays} days): ${recentPrivates} >= ${thresholds.recentPrivateThreshold}`);
+        if (recentPrivates >= thresholds.recentPrivateThreshold) {
+            console.log(`✨ IS WHALE: Recent privates threshold met`);
+            console.groupEnd();
             return true;
         }
     }
@@ -348,15 +373,20 @@ export function isWhale(username, thresholds) {
     const largeTipThreshold = thresholds.recentLargeTipThreshold;
     if (largeTipThreshold > 0 && recentTipSeconds > 0) {
         const periodStart = Date.now() - recentTipSeconds * 1000;
+        console.log(`Checking for large tips >= ${largeTipThreshold} in last ${recentTipSeconds} seconds...`);
         for (const event of user.eventHistory) {
             const eventTime = new Date(event.timestamp).getTime();
             if (eventTime < periodStart) break;
             if (event.type === 'tip' && event.data?.amount >= largeTipThreshold) {
+                console.log(`✨ IS WHALE: Large single tip found (${event.data.amount} tokens) at ${event.timestamp}`);
+                console.groupEnd();
                 return true;
             }
         }
     }
 
+    console.log(`❌ Not a whale: No thresholds met`);
+    console.groupEnd();
     return false;
 }
 
