@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chaturbate Whale Bell</title>
+    <link rel="stylesheet" href="main.css">
+</head>
+<body>
+    <header>
+        <h1>Chaturbate Whale Bell</h1>
+        <div id="connectionStatus">Status: Disconnected</div>
+        <button id="settingsButton">Settings</button>
+    </header>
+
+    <main>
+        <div id="mainArea">
+            <h2>Recent Activity</h2>
+            <ul id="activityLog">
+                <!-- Activity log entries will be added here -->
+            </ul>
+            <div id="currentThresholds">
+                <h3>Current Whale Thresholds</h3>
+                <!-- Thresholds will be displayed here -->
+            </div>
+        </div>
+
+        <section id="settingsPanel" style="display: none;">
+            <h2>Settings</h2>
+
+            <div id="connectionSettings">
+                <h3>Connection</h3>
+                <button id="startScan">Scan QR Code</button>
+                <video id="qrScanner" style="display: none; width: 300px;"></video>
+                <canvas id="qrCanvas" style="display: none;"></canvas>
+                <button id="cancelScan" style="display: none;">Cancel Scan</button>
+                <br>
+                <label for="scannedUrl">Events API URL:</label>
+                <input type="text" id="scannedUrl" placeholder="Paste URL here">
+                <button id="connectUrl">Connect</button>
+                <button id="disconnectApi">Disconnect</button>
+                <div id="apiEndpoint"></div>
+                <div id="broadcasterNameDisplay"></div>
+            </div>
+
+            <div id="whaleThresholdsSettings">
+                <h3>Whale Thresholds</h3>
+                <label for="lifetimeSpendingThreshold">Lifetime Spending:</label>
+                <input type="number" id="lifetimeSpendingThreshold" value="10000"><br>
+                <label for="recentTipThreshold">Recent Tip Amount:</label>
+                <input type="number" id="recentTipThreshold" value="1000"><br>
+                <label for="recentTipTimeframe">Recent Tip Timeframe (seconds):</label>
+                <input type="number" id="recentTipTimeframe" value="3600"><br>
+                 <label for="recentLargeTipThreshold">Recent Large Tip Amount:</label>
+                <input type="number" id="recentLargeTipThreshold" value="5000"><br>
+                <label for="recentPrivateThreshold">Recent Private Amount:</label>
+                <input type="number" id="recentPrivateThreshold" value="2000"><br>
+                <label for="recentPrivateTimeframe">Recent Private Timeframe (seconds):</label>
+                <input type="number" id="recentPrivateTimeframe" value="86400"><br>
+                <label for="totalPrivatesThreshold">Total Privates Amount:</label>
+                <input type="number" id="totalPrivatesThreshold" value="10000"><br>
+                <label for="totalLifetimeTipsThreshold">Total Lifetime Tips Amount:</label>
+                <input type="number" id="totalLifetimeTipsThreshold" value="5000"><br>
+                <button id="suggestThresholds">Suggest Thresholds</button>
+            </div>
+
+            <div id="soundSettings">
+                <h3>Sound</h3>
+                <label for="bellSound">Bell Sound:</label>
+                <select id="bellSound">
+                    <option value="default_bell.mp3">Default Bell</option>
+                    <!-- Add more sound options here -->
+                </select>
+                <button id="testSound">Test Sound</button>
+            </div>
+
+            <div id="dataManagement">
+                <h3>Data Management</h3>
+                <label for="tokenHistoryFile">Import Token History (.csv):</label>
+                <input type="file" id="tokenHistoryFile" accept=".csv" style="display: none;">
+                <button id="importTokenHistoryButton">Import CSV</button>
+                <br>
+                <label for="importDataFile">Import Data (.json):</label>
+                <input type="file" id="importDataFile" accept=".json" style="display: none;">
+                <button id="importDataButton">Import JSON</button>
+                <br>
+                <button id="exportDataButton">Export Data (.json)</button>
+                <br>
+                <label for="enablePassword">Enable Password Protection:</label>
+                <input type="checkbox" id="enablePassword">
+                <input type="password" id="dataPassword" placeholder="Enter password" style="display: none;">
+                <br>
+                <label for="mergeData">Merge with existing data on import:</label>
+                <input type="checkbox" id="mergeData">
+                <br>
+                <button id="factoryReset">Factory Reset</button>
+                <div id="dataManagementResult"></div>
+            </div>
+
+            <button id="saveConfig">Save Configuration</button>
+        </section>
+    </main>
+
+    <footer>
+        <p>Chaturbate Whale Bell v1.1 | <a href="https://github.com/honytsoi/cb-whale-bell" target="_blank">Project Page</a></p>
+    </footer>
+
+    <!-- External Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+
+    <!-- Application Scripts -->
+    <script type="module" src="main.js"></script>
+</body>
+</html>
