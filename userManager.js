@@ -1,6 +1,7 @@
 // userManager.js - Manages user data (loading, saving, updating)
 
 import { debounce, displayError, parseTimestamp } from './utils.js';
+import * as ui from './ui.js'; // Import ui for logging whale status
 
 const USERS_KEY = 'whaleBellUsers';
 const MAX_HISTORY_PER_USER = 1000; // As per spec
@@ -164,7 +165,7 @@ export function addEvent(username, type, data) {
     if (user.eventHistory.length > user.maxHistory) user.eventHistory.pop();
 
     if (eventData && typeof eventData.amount === 'number' && eventData.amount > 0) {
-        updateTokenStats(user, event); // Call detailed update function
+        updateTokenStats(user, event);
     }
 
     if (type === 'userEnter') markUserOnline(username, false);
@@ -184,28 +185,40 @@ function updateTokenStats(user, event) {
     const now = Date.now();
     const stats = user.tokenStats;
 
-    console.group(`Stat Update: ${user.username} - Event: ${event.type} (+${amount} tokens)`); // Group logs for this update
+    console.group(`Stat Update: ${user.username} - Event: ${event.type} (+${amount} tokens)`);
 
     try {
         // --- Log Before State ---
         console.log(`Before - Lifetime: Spent=${stats.totalSpent}, Tips=${stats.totalTips}, Privates=${stats.totalPrivates}, Media=${stats.totalMedia}`);
-        // Log relevant time periods before update
+        
         for (const periodKey in stats.timePeriods) {
-             const days = parseInt(periodKey.substring(1));
-             if (isNaN(days)) continue;
-             const periodStart = now - days * 24 * 60 * 60 * 1000;
-             if (eventTime >= periodStart) { // Only log periods this event falls into
-                 console.log(`Before - Period ${periodKey}: Total=${stats.timePeriods[periodKey].total}, Tips=${stats.timePeriods[periodKey].tips}, Privates=${stats.timePeriods[periodKey].privates}, Media=${stats.timePeriods[periodKey].media}`);
-             }
+            const days = parseInt(periodKey.substring(1));
+            if (isNaN(days)) continue;
+            const periodStart = now - days * 24 * 60 * 60 * 1000;
+            if (eventTime >= periodStart) {
+                console.log(`Before - Period ${periodKey}: Total=${stats.timePeriods[periodKey].total}, Tips=${stats.timePeriods[periodKey].tips}, Privates=${stats.timePeriods[periodKey].privates}, Media=${stats.timePeriods[periodKey].media}`);
+            }
         }
 
         // --- Perform Updates ---
         stats.totalSpent = (stats.totalSpent || 0) + amount;
         let category = 'other';
-        if (event.type === 'tip') { stats.totalTips = (stats.totalTips || 0) + amount; category = 'tips'; }
-        else if (event.type === 'privateShow' || event.type === 'privateShowSpy') { stats.totalPrivates = (stats.totalPrivates || 0) + amount; category = 'privates'; }
-        else if (event.type === 'mediaPurchase') { stats.totalMedia = (stats.totalMedia || 0) + amount; category = 'media'; }
+        
+        if (event.type === 'tip') {
+            stats.totalTips = (stats.totalTips || 0) + amount;
+            category = 'tips';
+            console.log(`    -> Added to totalTips. New totalTips: ${stats.totalTips}`);
+        } else if (event.type === 'privateShow' || event.type === 'privateShowSpy') {
+            stats.totalPrivates = (stats.totalPrivates || 0) + amount;
+            category = 'privates';
+            console.log(`    -> Added to totalPrivates. New totalPrivates: ${stats.totalPrivates}`);
+        } else if (event.type === 'mediaPurchase') {
+            stats.totalMedia = (stats.totalMedia || 0) + amount;
+            category = 'media';
+            console.log(`    -> Added to totalMedia. New totalMedia: ${stats.totalMedia}`);
+        }
 
+        // Period stats adjustment
         for (const periodKey in stats.timePeriods) {
             const days = parseInt(periodKey.substring(1));
             if (isNaN(days)) continue;
@@ -213,110 +226,98 @@ function updateTokenStats(user, event) {
             if (eventTime >= periodStart) {
                 const periodStats = stats.timePeriods[periodKey];
                 periodStats.total = (periodStats.total || 0) + amount;
-                if (category !== 'other') periodStats[category] = (periodStats[category] || 0) + amount;
+                if (category !== 'other') {
+                    periodStats[category] = (periodStats[category] || 0) + amount;
+                }
+                console.log(`    -> Period ${periodKey}: Total=${periodStats.total}, ${category}=${periodStats[category]}`);
             }
         }
+        
         stats.lastUpdated = new Date().toISOString();
 
         // --- Log After State ---
         console.log(`After  - Lifetime: Spent=${stats.totalSpent}, Tips=${stats.totalTips}, Privates=${stats.totalPrivates}, Media=${stats.totalMedia}`);
-         for (const periodKey in stats.timePeriods) {
-             const days = parseInt(periodKey.substring(1));
-             if (isNaN(days)) continue;
-             const periodStart = now - days * 24 * 60 * 60 * 1000;
-             if (eventTime >= periodStart) { // Only log periods this event falls into
-                 console.log(`After  - Period ${periodKey}: Total=${stats.timePeriods[periodKey].total}, Tips=${stats.timePeriods[periodKey].tips}, Privates=${stats.timePeriods[periodKey].privates}, Media=${stats.timePeriods[periodKey].media}`);
-             }
+        for (const periodKey in stats.timePeriods) {
+            const days = parseInt(periodKey.substring(1));
+            if (isNaN(days)) continue;
+            const periodStart = now - days * 24 * 60 * 60 * 1000;
+            if (eventTime >= periodStart) {
+                console.log(`After  - Period ${periodKey}: Total=${stats.timePeriods[periodKey].total}, Tips=${stats.timePeriods[periodKey].tips}, Privates=${stats.timePeriods[periodKey].privates}, Media=${stats.timePeriods[periodKey].media}`);
+            }
         }
-
-    } catch(error) {
-        console.error("Error during stat update:", error);
     } finally {
-         console.groupEnd(); // End group for this update
+        console.groupEnd();
     }
-    // No separate save call here, rely on the save triggered by addEvent
 }
 
 export function recalculateAllUserStats() {
     console.log("Recalculating stats for all users...");
-    // Need ui reference for displayMessage - consider moving this function or passing ui module?
-    // For now, just log to console.
-    // ui.displayMessage("Recalculating all user stats... This may take a moment.", "info", "dataManagementResult", 0);
     let count = 0;
     users.forEach(user => { recalculateTotals(user, false); count++; });
     saveUsers();
     console.log(`Recalculation complete for ${count} users.`);
-    // ui.displayMessage(`Stats recalculation complete for ${count} users.`, "success", "dataManagementResult");
 }
 
 export function recalculateTotals(user, shouldSave = true) {
     if (!user) return;
-    // console.log(`Recalculating totals for ${user.username}...`); // Verbose
     user.tokenStats = createDefaultTokenStats(user.username); // Reset stats
     const stats = user.tokenStats;
     const now = Date.now();
-    for (let i = user.eventHistory.length - 1; i >= 0; i--) { // Iterate oldest to newest
-        const event = user.eventHistory[i];
-         if (event.data && typeof event.data.amount === 'number' && event.data.amount > 0) {
-             const amount = event.data.amount; const eventTime = new Date(event.timestamp).getTime();
-             stats.totalSpent += amount; let category = 'other';
-             if (event.type === 'tip') { stats.totalTips += amount; category = 'tips'; }
-             else if (event.type === 'privateShow' || event.type === 'privateShowSpy') { stats.totalPrivates += amount; category = 'privates'; }
-             else if (event.type === 'mediaPurchase') { stats.totalMedia += amount; category = 'media'; }
-             for (const periodKey in stats.timePeriods) {
-                 const days = parseInt(periodKey.substring(1)); if (isNaN(days)) continue;
-                 const periodStart = now - days * 24 * 60 * 60 * 1000;
-                 if (eventTime >= periodStart) {
-                     const periodStats = stats.timePeriods[periodKey]; periodStats.total += amount;
-                     if (category !== 'other') periodStats[category] += amount;
-                 }
-             }
-         }
+    let processedPrivateMeta = false;
+
+    console.groupCollapsed(`Recalculating Stats for: ${user.username}`);
+
+    try {
+        for (let i = user.eventHistory.length - 1; i >= 0; i--) {
+            const event = user.eventHistory[i];
+            if (event.data && typeof event.data.amount === 'number' && event.data.amount > 0) {
+                const amount = event.data.amount;
+                const eventTime = new Date(event.timestamp).getTime();
+                stats.totalSpent += amount;
+                let category = 'other';
+
+                console.log(` -> Processing event [${i}]: type='${event.type}', amount=${amount}, timestamp='${event.timestamp}'`);
+
+                if (event.type === 'tip') {
+                    stats.totalTips += amount;
+                    category = 'tips';
+                    console.log(`    -> Added to totalTips. New totalTips: ${stats.totalTips}`);
+                }
+                else if (event.type === 'privateShow' || event.type === 'privateShowSpy') {
+                    stats.totalPrivates += amount;
+                    category = 'privates';
+                    processedPrivateMeta = true;
+                    console.log(`    -> Added to totalPrivates. New totalPrivates: ${stats.totalPrivates}`);
+                }
+                else if (event.type === 'mediaPurchase') {
+                    stats.totalMedia += amount;
+                    category = 'media';
+                    console.log(`    -> Added to totalMedia. New totalMedia: ${stats.totalMedia}`);
+                }
+
+                // Update period stats
+                for (const periodKey in stats.timePeriods) {
+                    const days = parseInt(periodKey.substring(1));
+                    if (isNaN(days)) continue;
+                    const periodStart = now - days * 24 * 60 * 60 * 1000;
+                    if (eventTime >= periodStart) {
+                        const periodStats = stats.timePeriods[periodKey];
+                        periodStats.total = (periodStats.total || 0) + amount;
+                        if (category !== 'other') {
+                            periodStats[category] = (periodStats[category] || 0) + amount;
+                        }
+                        console.log(`    -> Period ${periodKey}: Total=${periodStats.total}, ${category}=${periodStats[category]}`);
+                    }
+                }
+            }
+        }
+    } finally {
+        console.groupEnd();
     }
+
     stats.lastUpdated = new Date().toISOString();
     if (shouldSave) saveUsers();
 }
-
-// --- Getters for Stats ---
-export function getUserStats(username) {
-     const user = getUser(username);
-     return user ? JSON.parse(JSON.stringify(user.tokenStats)) : createDefaultTokenStats(username);
-}
-export function getTotalSpent(username) { return getUserStats(username).totalSpent; }
-export function getTotalTips(username) { return getUserStats(username).totalTips; }
-export function getTotalPrivates(username) { return getUserStats(username).totalPrivates; }
-
-export function getSpentInPeriod(username, days, category = 'total') {
-    const user = getUser(username);
-    if (!user || !user.tokenStats?.timePeriods) return 0;
-    const periodKey = `d${days}`;
-    const periodStats = user.tokenStats.timePeriods[periodKey];
-    if (!periodStats) {
-        console.warn(`Pre-calculated stats for period ${periodKey} not found for user ${username}. Recalculating might be needed.`);
-        return calculateSpentInPeriodOnTheFly(user, days, category); // Pass user object
-    }
-    // Ensure category exists before returning
-    return periodStats[category] || 0;
-}
-
-function calculateSpentInPeriodOnTheFly(user, days, category = 'all') {
-    if (!user) return 0;
-    const now = Date.now();
-    const periodStart = now - days * 24 * 60 * 60 * 1000;
-    let totalSpentInPeriod = 0;
-    for (const event of user.eventHistory) {
-        const eventTime = new Date(event.timestamp).getTime();
-        if (eventTime < periodStart) break;
-        if (event.data && typeof event.data.amount === 'number' && event.data.amount > 0) {
-            const amount = event.data.amount; const type = event.type;
-            if (category === 'all' || category === 'total') { totalSpentInPeriod += amount; }
-            else if (category === 'tips' && type === 'tip') { totalSpentInPeriod += amount; }
-            else if (category === 'privates' && (type === 'privateShow' || type === 'privateShowSpy')) { totalSpentInPeriod += amount; }
-            else if (category === 'media' && type === 'mediaPurchase') { totalSpentInPeriod += amount; }
-        }
-    } return totalSpentInPeriod;
-}
-
 
 // --- Online/Offline Status ---
 
@@ -340,35 +341,20 @@ export function markUserOffline(username, shouldSave = true) {
 
 export function isWhale(username, thresholds) {
     const user = getUser(username);
-    if (!user || !user.tokenStats) {
-        // console.log(`Whale Check (${username}): No user data found.`); // Less verbose if no data
-        return false;
-    }
-
-    const stats = user.tokenStats;
-    let isUserWhale = false;
-
-    console.groupCollapsed(`Whale Check: ${username}`); // Use groupCollapsed for less noise unless expanded
-
+    if (!user || !user.tokenStats) { return false; }
+    const stats = user.tokenStats; let isUserWhale = false;
+    console.groupCollapsed(`Whale Check: ${username}`);
     try {
         console.log(`Stats: Spent=${stats.totalSpent}, Tips=${stats.totalTips}, Privates=${stats.totalPrivates}`);
-
-        // 1. Lifetime Spending
         const lifetimeCheck = stats.totalSpent >= thresholds.lifetimeSpendingThreshold;
         console.log(` -> Lifetime Spending: ${stats.totalSpent} >= ${thresholds.lifetimeSpendingThreshold} ? ${lifetimeCheck}`);
         if (lifetimeCheck) { console.log(`   * WHALE Reason: Lifetime spending.`); isUserWhale = true; }
-
-        // 2. Total Lifetime Tips
         const lifetimeTipsCheck = stats.totalTips >= thresholds.totalLifetimeTipsThreshold;
         console.log(` -> Lifetime Tips: ${stats.totalTips} >= ${thresholds.totalLifetimeTipsThreshold} ? ${lifetimeTipsCheck}`);
         if (lifetimeTipsCheck) { console.log(`   * WHALE Reason: Lifetime tips.`); isUserWhale = true; }
-
-         // 3. Total Lifetime Privates
         const lifetimePrivatesCheck = stats.totalPrivates >= thresholds.totalPrivatesThreshold;
         console.log(` -> Lifetime Privates: ${stats.totalPrivates} >= ${thresholds.totalPrivatesThreshold} ? ${lifetimePrivatesCheck}`);
         if (lifetimePrivatesCheck) { console.log(`   * WHALE Reason: Lifetime privates.`); isUserWhale = true; }
-
-        // 4. Recent Tip Total
         const recentTipSeconds = thresholds.recentTipTimeframe;
         if (recentTipSeconds > 0) {
             const recentTipDays = Math.ceil(recentTipSeconds / 86400);
@@ -377,8 +363,6 @@ export function isWhale(username, thresholds) {
             console.log(` -> Recent Tips (~${recentTipDays}d): ${recentTips} >= ${thresholds.recentTipThreshold} ? ${recentTipsCheck}`);
             if (recentTipsCheck) { console.log(`   * WHALE Reason: Recent tips.`); isUserWhale = true; }
         } else { console.log(` -> Recent Tips: Skipped (Timeframe=0)`); }
-
-        // 5. Recent Private Total
         const recentPrivateSeconds = thresholds.recentPrivateTimeframe;
          if (recentPrivateSeconds > 0) {
             const recentPrivateDays = Math.ceil(recentPrivateSeconds / 86400);
@@ -387,30 +371,21 @@ export function isWhale(username, thresholds) {
             console.log(` -> Recent Privates (~${recentPrivateDays}d): ${recentPrivates} >= ${thresholds.recentPrivateThreshold} ? ${recentPrivatesCheck}`);
             if (recentPrivatesCheck) { console.log(`   * WHALE Reason: Recent privates.`); isUserWhale = true; }
         } else { console.log(` -> Recent Privates: Skipped (Timeframe=0)`); }
-
-        // 6. Recent Large Single Tip
         const largeTipThreshold = thresholds.recentLargeTipThreshold;
         if (largeTipThreshold > 0 && recentTipSeconds > 0) {
-            const periodStart = Date.now() - recentTipSeconds * 1000;
-            let foundLargeTip = false;
+            const periodStart = Date.now() - recentTipSeconds * 1000; let foundLargeTip = false;
             for (const event of user.eventHistory) {
-                const eventTime = new Date(event.timestamp).getTime();
-                if (eventTime < periodStart) break;
+                const eventTime = new Date(event.timestamp).getTime(); if (eventTime < periodStart) break;
                 if (event.type === 'tip' && event.data?.amount >= largeTipThreshold) {
                     console.log(` -> Large Single Tip (${recentTipSeconds}s): Found ${event.data.amount} >= ${largeTipThreshold} ? true`);
-                    console.log(`   * WHALE Reason: Large single tip.`);
-                    isUserWhale = true; foundLargeTip = true; break;
+                    console.log(`   * WHALE Reason: Large single tip.`); isUserWhale = true; foundLargeTip = true; break;
                 }
             }
             if (!foundLargeTip) { console.log(` -> Large Single Tip (${recentTipSeconds}s): No tip >= ${largeTipThreshold} found ? false`); }
         } else { console.log(` -> Large Single Tip: Skipped (Threshold or Timeframe=0)`); }
-
-        if (!isUserWhale) { console.log(" -> Verdict: Not a whale."); }
-        else { console.log(" -> Verdict: IS A WHALE."); }
-
+        if (!isUserWhale) { console.log(" -> Verdict: Not a whale."); } else { console.log(" -> Verdict: IS A WHALE."); }
     } catch (error) { console.error(`Error during whale check for ${username}:`, error); }
     finally { console.groupEnd(); }
-
     return isUserWhale;
 }
 
@@ -432,4 +407,57 @@ export function importUser(userObject) {
      if (!userObject.maxHistory) userObject.maxHistory = MAX_HISTORY_PER_USER;
      userObject.isOnline = false;
      users.set(username, userObject);
+}
+
+// --- Getters for Stats ---
+export function getUserStats(username) {
+    const user = getUser(username);
+    return user ? JSON.parse(JSON.stringify(user.tokenStats)) : createDefaultTokenStats(username);
+}
+
+export function getTotalSpent(username) { return getUserStats(username).totalSpent; }
+export function getTotalTips(username) { return getUserStats(username).totalTips; }
+export function getTotalPrivates(username) { return getUserStats(username).totalPrivates; }
+
+export function getSpentInPeriod(username, days, category = 'total') {
+    const user = getUser(username);
+    if (!user || !user.tokenStats?.timePeriods) return 0;
+    const periodKey = `d${days}`;
+    const periodStats = user.tokenStats.timePeriods[periodKey];
+    if (!periodStats) {
+        console.warn(`Pre-calculated stats for period ${periodKey} not found for user ${username}. Recalculating might be needed.`);
+        return calculateSpentInPeriodOnTheFly(user, days, category);
+    }
+    return periodStats[category] || 0;
+}
+
+function calculateSpentInPeriodOnTheFly(user, days, category = 'all') {
+    if (!user) return 0;
+    const now = Date.now();
+    const periodStart = now - days * 24 * 60 * 60 * 1000;
+    let totalSpentInPeriod = 0;
+    
+    for (const event of user.eventHistory) {
+        const eventTime = new Date(event.timestamp).getTime();
+        if (eventTime < periodStart) break;
+        
+        if (event.data && typeof event.data.amount === 'number' && event.data.amount > 0) {
+            const amount = event.data.amount;
+            const type = event.type;
+            
+            if (category === 'all' || category === 'total') {
+                totalSpentInPeriod += amount;
+            }
+            else if (category === 'tips' && type === 'tip') {
+                totalSpentInPeriod += amount;
+            }
+            else if (category === 'privates' && (type === 'privateShow' || type === 'privateShowSpy')) {
+                totalSpentInPeriod += amount;
+            }
+            else if (category === 'media' && type === 'mediaPurchase') {
+                totalSpentInPeriod += amount;
+            }
+        }
+    }
+    return totalSpentInPeriod;
 }

@@ -42,6 +42,9 @@ export function handleTokenHistoryImport(file) {
                  ui.displayMessage('CSV missing required columns (User, Token change, Timestamp, Note).', 'error', 'dataManagementResult');
                 return;
             }
+            
+            // Show progress UI before starting processing
+            ui.showImportProgress(results.data.length);
             setTimeout(() => processCsvData(results.data), 0); // Process async
         },
         error: (error) => {
@@ -59,7 +62,6 @@ function validateCsvHeaders(headers) {
 
 function processCsvData(data) {
     console.log("Processing CSV data rows:", data.length);
-    ui.displayMessage(`Processing ${data.length} CSV rows... This might take a while.`, 'info', 'dataManagementResult', 0);
 
     let importedTokenCount = 0;
     let processedUserCount = new Set();
@@ -67,87 +69,146 @@ function processCsvData(data) {
     let duplicatesSkippedCount = 0;
     let privateShowsCreated = 0;
     let spyShowsCreated = 0;
+    let rowsProcessed = 0;
 
     // --- Pre-processing: Group data by user and sort by timestamp ---
     const userData = {};
-    data.forEach(row => {
-        const username = row.User?.trim();
-        const amountStr = row["Token change"];
-        const timestampStr = row.Timestamp;
-        const note = row.Note?.trim() || '';
+    
+    // Process rows in chunks to allow UI updates
+    function processChunk(startIndex, chunkSize) {
+        const endIndex = Math.min(startIndex + chunkSize, data.length);
+        
+        for(let i = startIndex; i < endIndex; i++) {
+            const row = data[i];
+            const username = row.User?.trim();
+            const amountStr = row["Token change"];
+            const timestampStr = row.Timestamp;
+            const transactionType = row["Transaction type"]?.trim() || '';
+            const note = row.Note?.trim() || '';
 
-        if (!username || !amountStr || !timestampStr) return;
-        const amount = parseFloat(amountStr);
-        const timestamp = parseTimestamp(timestampStr);
-        if (isNaN(amount) || amount <= 0 || !timestamp) return;
+            if (!username || !amountStr || !timestampStr) continue;
+            const amount = parseFloat(amountStr);
+            const timestamp = parseTimestamp(timestampStr);
+            if (isNaN(amount) || amount <= 0 || !timestamp) continue;
 
-        if (!userData[username]) userData[username] = [];
-        userData[username].push({ username, amount, timestamp, note, originalRow: row });
-    });
+            if (!userData[username]) userData[username] = [];
+            userData[username].push({ 
+                username, 
+                amount, 
+                timestamp, 
+                transactionType,
+                note, 
+                originalRow: row 
+            });
+            
+            rowsProcessed++;
+            // Update UI every 50 rows
+            if (rowsProcessed % 50 === 0 || rowsProcessed === data.length) {
+                ui.updateImportProgress(rowsProcessed, data.length, {
+                    usersFound: Object.keys(userData).length,
+                    tokensProcessed: importedTokenCount,
+                    privateShowsFound: privateShowsCreated,
+                    spyShowsFound: spyShowsCreated
+                });
+            }
+        }
 
-    for (const username in userData) {
-        userData[username].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        // If there are more rows to process, schedule the next chunk
+        if (endIndex < data.length) {
+            setTimeout(() => processChunk(endIndex, chunkSize), 0);
+        } else {
+            // All rows processed, continue with user processing
+            console.log("Initial data grouping complete. Processing users...");
+            processUsers();
+        }
     }
 
-    // --- Processing Logic (Iterate through users and their sorted events) ---
-    let usersProcessed = 0;
-    const totalUsers = Object.keys(userData).length;
-
-    for (const username in userData) {
-        usersProcessed++;
-        if (usersProcessed % 50 === 0) { // Update progress periodically
-             ui.displayMessage(`Processing CSV: User ${usersProcessed}/${totalUsers}...`, 'info', 'dataManagementResult', 0);
+    function processUsers() {
+        // Sort events for each user
+        for (const username in userData) {
+            userData[username].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
         }
 
-        processedUserCount.add(username);
-        // Ensure user exists in userManager before getting history/signatures
-        userManager.addUser(username); // Creates user if doesn't exist
-        const existingUser = userManager.getUser(username); // Now guaranteed to exist
-        const existingEventSignatures = new Set();
+        const usernames = Object.keys(userData);
+        let userIndex = 0;
 
-        if (existingUser?.eventHistory) {
-            existingUser.eventHistory.forEach(event => {
-                const signature = createEventSignature(event);
-                if (signature) existingEventSignatures.add(signature);
-            });
+        function processNextUser() {
+            if (userIndex >= usernames.length) {
+                finishProcessing();
+                return;
+            }
+
+            const username = usernames[userIndex];
+            processedUserCount.add(username);
+            userManager.addUser(username);
+            const existingUser = userManager.getUser(username);
+            const existingEventSignatures = new Set();
+
+            if (existingUser?.eventHistory) {
+                existingUser.eventHistory.forEach(event => {
+                    const signature = createEventSignature(event);
+                    if (signature) existingEventSignatures.add(signature);
+                });
+            }
+
+            ui.displayMessage(`Processing user ${userIndex + 1}/${usernames.length}: ${username}...`, 'info', 'dataManagementResult', 0);
+
+            processUserEvents(username, userData[username], existingEventSignatures);
+            userIndex++;
+            
+            // Update stats for this user
+            const finalUserStats = userManager.getUserStats(username);
+            console.log(`(${username}) Stats after CSV processing & recalc: Spent=${finalUserStats.totalSpent}, Tips=${finalUserStats.totalTips}, Privates=${finalUserStats.totalPrivates}`);
+
+            // Schedule next user processing
+            setTimeout(processNextUser, 0);
         }
 
+        // Start processing users
+        processNextUser();
+    }
+
+    function processUserEvents(username, events, existingEventSignatures) {
         let i = 0;
-        while (i < userData[username].length) {
-            const currentEvent = userData[username][i];
-            const noteLower = currentEvent.note.toLowerCase();
-            const isPotentialPrivate = noteLower.includes('private');
-            const isPotentialSpy = noteLower.includes('spy');
+        while (i < events.length) {
+            const currentEvent = events[i];
+            const isPrivateShow = currentEvent.transactionType === 'Private show';
+            const isSpyShow = currentEvent.transactionType === 'Spy on private show';
 
-            // --- Duplicate Check (using signature of the raw CSV event) ---
+            // --- Duplicate Check (raw CSV event) ---
             const csvEventSignature = `${currentEvent.username}-${currentEvent.timestamp}-${currentEvent.amount.toFixed(2)}`;
             if (existingEventSignatures.has(csvEventSignature)) {
                 duplicatesSkippedCount++;
                 i++;
-                continue; // Skip this raw event if its exact signature exists
+                continue;
             }
 
             // --- Private/Spy Show Grouping ---
-            if (isPotentialPrivate || isPotentialSpy) {
+            if (isPrivateShow || isSpyShow) {
                 let showGroup = [currentEvent];
                 let showTotal = currentEvent.amount;
                 let j = i + 1;
 
-                while (j < userData[username].length) {
-                    const nextEvent = userData[username][j];
-                    const timeDiffSeconds = (new Date(nextEvent.timestamp).getTime() - new Date(userData[username][showGroup.length - 1].timestamp).getTime()) / 1000; // This line seems complex, let's re-evaluate the logic
-                    if (timeDiffSeconds >= PRIVATE_SHOW_GROUPING_THRESHOLD_SECONDS) break;
+                while (j < events.length) {
+                    const nextEvent = events[j];
+                    const timeDiffSeconds = (new Date(nextEvent.timestamp).getTime() - new Date(showGroup[showGroup.length - 1].timestamp).getTime()) / 1000;
 
-                    const nextNoteLower = nextEvent.note.toLowerCase();
-                    if (nextNoteLower.includes('private') || nextNoteLower.includes('spy')) {
-                         const nextCsvEventSignature = `${nextEvent.username}-${nextEvent.timestamp}-${nextEvent.amount.toFixed(2)}`;
-                         if (existingEventSignatures.has(nextCsvEventSignature)) {
-                             duplicatesSkippedCount++;
-                         } else {
+                    if (timeDiffSeconds >= PRIVATE_SHOW_GROUPING_THRESHOLD_SECONDS) {
+                        break;
+                    }
+
+                    const nextIsPrivate = nextEvent.transactionType === 'Private show';
+                    const nextIsSpy = nextEvent.transactionType === 'Spy on private show';
+                    
+                    if ((isPrivateShow && nextIsPrivate) || (isSpyShow && nextIsSpy)) {
+                        const nextCsvEventSignature = `${nextEvent.username}-${nextEvent.timestamp}-${nextEvent.amount.toFixed(2)}`;
+                        if (existingEventSignatures.has(nextCsvEventSignature)) {
+                            duplicatesSkippedCount++;
+                        } else {
                             showGroup.push(nextEvent);
                             showTotal += nextEvent.amount;
-                         }
-                         j++;
+                        }
+                        j++;
                     } else {
                         break;
                     }
@@ -157,81 +218,126 @@ function processCsvData(data) {
                     const startTime = showGroup[0].timestamp;
                     const endTime = showGroup[showGroup.length - 1].timestamp;
                     const duration = Math.max(0, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 1000);
-                    const showType = isPotentialSpy ? 'privateShowSpy' : 'privateShow';
+                    const showType = isPrivateShow ? 'privateShow' : 'privateShowSpy';
 
                     const metaEventData = {
-                        timestamp: startTime, startTime: startTime, endTime: endTime,
-                        duration: duration, tokens: showTotal, amount: showTotal,
+                        timestamp: startTime,
+                        startTime: startTime,
+                        endTime: endTime,
+                        duration: duration,
+                        tokens: showTotal,
+                        amount: showTotal,
                     };
 
                     const metaEventSignature = createEventSignature({ type: showType, timestamp: startTime, data: metaEventData });
                     if (metaEventSignature && existingEventSignatures.has(metaEventSignature)) {
-                         duplicatesSkippedCount++;
+                        duplicatesSkippedCount++;
                     } else {
-                        // Use addEvent directly - it handles adding user and saving (debounced)
                         userManager.addEvent(username, showType, metaEventData);
                         eventsAddedCount++;
                         importedTokenCount += showTotal;
                         if (showType === 'privateShow') privateShowsCreated++; else spyShowsCreated++;
                         if (metaEventSignature) existingEventSignatures.add(metaEventSignature);
+
+                        ui.updateImportProgress(rowsProcessed, data.length, {
+                            usersFound: processedUserCount.size,
+                            tokensProcessed: importedTokenCount,
+                            privateShowsFound: privateShowsCreated,
+                            spyShowsFound: spyShowsCreated
+                        });
                     }
 
                     showGroup.forEach(groupedEvent => {
-                         const groupedCsvSignature = `${groupedEvent.username}-${groupedEvent.timestamp}-${groupedEvent.amount.toFixed(2)}`;
-                         existingEventSignatures.add(groupedCsvSignature);
+                        const groupedCsvSignature = `${groupedEvent.username}-${groupedEvent.timestamp}-${groupedEvent.amount.toFixed(2)}`;
+                        existingEventSignatures.add(groupedCsvSignature);
                     });
 
-                    i = j; continue;
+                    i = j;
+                    continue;
                 }
             }
 
-            // --- Regular Tip Processing ---
-            const tipData = { amount: currentEvent.amount, note: currentEvent.note, timestamp: currentEvent.timestamp };
-            const tipEventSignature = createEventSignature({ type: 'tip', timestamp: currentEvent.timestamp, data: tipData });
+            // --- Regular Tip/Media Processing ---
+            const eventType = determineEventType(currentEvent.transactionType);
+            if (eventType !== 'other') {
+                const eventData = { 
+                    amount: currentEvent.amount, 
+                    note: currentEvent.note, 
+                    timestamp: currentEvent.timestamp,
+                    transactionType: currentEvent.transactionType
+                };
+                
+                if (eventType === 'mediaPurchase') {
+                    eventData.item = currentEvent.note || 'Unknown media';
+                }
 
-            if (tipEventSignature && existingEventSignatures.has(tipEventSignature)) {
-                 duplicatesSkippedCount++;
-            } else {
-                // Use addEvent directly
-                userManager.addEvent(username, 'tip', tipData);
-                eventsAddedCount++;
-                importedTokenCount += currentEvent.amount;
-                if (tipEventSignature) existingEventSignatures.add(tipEventSignature);
+                const eventSignature = createEventSignature({ type: eventType, timestamp: currentEvent.timestamp, data: eventData });
+
+                if (eventSignature && existingEventSignatures.has(eventSignature)) {
+                    duplicatesSkippedCount++;
+                } else {
+                    userManager.addEvent(username, eventType, eventData);
+                    eventsAddedCount++;
+                    importedTokenCount += currentEvent.amount;
+                    if (eventSignature) existingEventSignatures.add(eventSignature);
+                }
             }
-            existingEventSignatures.add(csvEventSignature); // Add raw sig regardless
+            existingEventSignatures.add(csvEventSignature);
 
             i++;
         }
-         // Recalculate totals for the user after processing all their CSV events
-         // Pass the user object directly, don't rely on closure
-         userManager.recalculateTotals(userManager.getUser(username), false); // Don't save yet
     }
 
-    userManager.saveUsers(); // Final save after all users processed
+    function finishProcessing() {
+        console.log("Finished detailed user event processing. Final save pending...");
+        userManager.saveUsers();
 
-    let summary = `CSV Import Complete: Added ${eventsAddedCount} events (${importedTokenCount.toFixed(0)} tokens) for ${processedUserCount.size} users.`;
-    if (duplicatesSkippedCount > 0) summary += ` Skipped ${duplicatesSkippedCount} duplicate entries.`;
-    if (privateShowsCreated > 0) summary += ` Created ${privateShowsCreated} Private Show groups.`;
-    if (spyShowsCreated > 0) summary += ` Created ${spyShowsCreated} Spy Show groups.`;
-    ui.displayMessage(summary, 'success', 'dataManagementResult', 15000);
-    console.log(summary);
+        // Hide progress UI
+        ui.hideImportProgress();
+
+        // Display summary message
+        let summary = `CSV Import Complete: Added ${eventsAddedCount} events (${importedTokenCount.toFixed(0)} tokens) for ${processedUserCount.size} users.`;
+        if (duplicatesSkippedCount > 0) summary += ` Skipped ${duplicatesSkippedCount} duplicate entries.`;
+        if (privateShowsCreated > 0) summary += ` Created ${privateShowsCreated} Private Show groups.`;
+        if (spyShowsCreated > 0) summary += ` Created ${spyShowsCreated} Spy Show groups.`;
+        ui.displayMessage(summary, 'success', 'dataManagementResult', 15000);
+        console.log(summary);
+    }
+
+    // Start processing with initial chunk
+    ui.showImportProgress(data.length);
+    processChunk(0, 100); // Process 100 rows at a time
 }
 
 // Helper to create a consistent signature for duplicate checking
 function createEventSignature(event) {
     if (!event || !event.timestamp || !event.type) return null;
     let amountStr = "0.00";
-    const amountVal = event.data?.amount ?? event.data?.tokens; // Use amount or tokens
+    const amountVal = event.data?.amount ?? event.data?.tokens;
     if (typeof amountVal === 'number') {
         amountStr = parseFloat(amountVal).toFixed(2);
     }
-    // Signature: type-timestampISO-amount
     return `${event.type}-${event.timestamp}-${amountStr}`;
 }
 
+// Helper to determine event type from transaction type
+function determineEventType(transactionType) {
+    switch (transactionType) {
+        case 'Tip received':
+            return 'tip';
+        case 'Private show':
+            return 'privateShow';
+        case 'Spy on private show':
+            return 'privateShowSpy';
+        case 'Photos/videos purchased':
+            return 'mediaPurchase';
+        default:
+            return 'other';
+    }
+}
 
 // --- JSON Export/Import ---
-
+// ... (Export/Import/Reset/Backup/Validation/Utility functions remain the same) ...
 export function exportData() {
     console.log("Exporting data...");
     ui.displayMessage('Preparing data for export...', 'info', 'dataManagementResult', 0);
@@ -366,8 +472,9 @@ function mergeUsers(importedUsers) {
 
     importedUsers.forEach(importedUser => {
         usersProcessed++;
-        if (usersProcessed % 20 === 0) { // Update progress
+        if (usersProcessed % 50 === 0 || usersProcessed === totalToProcess) { // Update progress
              ui.displayMessage(`Merging user data: ${usersProcessed}/${totalToProcess}...`, 'info', 'dataManagementResult', 0);
+             console.log(`Merging user data: ${usersProcessed}/${totalToProcess}...`);
         }
 
         if (!importedUser || !importedUser.username) {
@@ -396,20 +503,15 @@ function mergeUsers(importedUsers) {
 
             combinedHistory.forEach(event => {
                 const signature = createEventSignature(event);
-                // Keep the first occurrence (which might be existing or imported)
-                // If timestamps differ slightly for "same" event, this keeps one.
                 if (signature && !uniqueEventsMap.has(signature)) {
                     uniqueEventsMap.set(signature, event);
                 } else if (!signature) {
-                    // Handle events without a clear signature? Maybe add anyway?
-                    // For now, we only merge events with signatures.
                     console.warn("Event without signature during merge:", event);
                 }
             });
 
-            // Sort merged unique events (newest first)
             const mergedUniqueEvents = Array.from(uniqueEventsMap.values());
-            mergedUniqueEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            mergedUniqueEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); // Sort newest first
 
             // Truncate and update history
             existingUser.eventHistory = mergedUniqueEvents.slice(0, userManager.MAX_HISTORY_PER_USER || 1000);
@@ -425,15 +527,14 @@ function mergeUsers(importedUsers) {
              userManager.recalculateTotals(userManager.getUser(username), false); // Don't save yet
         }
     });
-
+    // Final save happens after processImportedJson finishes
     return `Merged data: Added ${newUsers} new users, merged ${mergedUsers} existing users.`;
 }
 
 
 function validateImportData(data) {
     if (!data || typeof data !== 'object') {
-        ui.displayMessage('Invalid import file format (not an object).', 'error', 'dataManagementResult');
-        return false;
+        ui.displayMessage('Invalid import file format (not an object).', 'error', 'dataManagementResult'); return false;
     }
     if (data.version && data.version !== CURRENT_APP_VERSION) {
         ui.displayMessage(`Warning: Import file version (${data.version}) differs from app version (${CURRENT_APP_VERSION}). Data structure might be incompatible.`, 'info', 'dataManagementResult', 10000);
@@ -443,14 +544,11 @@ function validateImportData(data) {
          console.warn(`Import file missing version information.`);
     }
     if (!Array.isArray(data.users)) {
-         ui.displayMessage('Invalid import data: "users" array is missing or not an array.', 'error', 'dataManagementResult');
-        return false;
+         ui.displayMessage('Invalid import data: "users" array is missing or not an array.', 'error', 'dataManagementResult'); return false;
     }
      if (typeof data.settings !== 'object' || data.settings === null) {
-        ui.displayMessage('Invalid import data: "settings" object is missing or not an object.', 'error', 'dataManagementResult');
-        return false;
+        ui.displayMessage('Invalid import data: "settings" object is missing or not an object.', 'error', 'dataManagementResult'); return false;
     }
-    // Add more granular validation? Check if users have username?
     return true;
 }
 
@@ -468,7 +566,6 @@ function createBackup() {
         ui.displayMessage('Backup of current data created before import.', 'info', 'dataManagementResult', 5000);
     } catch (error) {
         console.error("Failed to create backup:", error);
-        // Don't stop import, but warn
         ui.displayMessage('Warning: Failed to create backup before import.', 'error', 'dataManagementResult');
     }
 }
@@ -479,11 +576,10 @@ export function factoryReset() {
         if (confirm("FINAL WARNING:\n\nReally delete everything?")) {
             try {
                 ui.displayMessage('Performing factory reset...', 'info', 'dataManagementResult', 0);
-                // Stop API connection if active
-                // Need to import apiHandler here or handle this differently
-                // if (apiHandler && apiHandler.isApiConnected()) { apiHandler.disconnect(); }
+                // Stop API connection if active - Need to import apiHandler or handle differently
+                // Example: Check if disconnect function exists globally or pass it in?
+                // if (typeof window.disconnectApiHandler === 'function') window.disconnectApiHandler();
 
-                // Clear data
                 userManager.clearAllUsers();
                 configManager.resetConfig();
                 localStorage.removeItem(BACKUP_KEY);

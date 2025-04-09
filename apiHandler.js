@@ -96,7 +96,7 @@ function processEvent(event) {
 
                     // Log user status (new/existing) before whale check
                     console.log(`User Entered: ${username} (${isNewUser ? 'NEW user' : 'Existing user'})`);
-                    ui.addLogEntry(`${username} entered.`, 'info'); // Keep simple UI log
+                    ui.addLogEntry(`${username} entered.`, 'user-enter'); // Changed from 'info' to 'user-enter'
 
                     // Perform detailed whale check (logs internally now)
                     const thresholds = configManager.getConfig();
@@ -109,7 +109,7 @@ function processEvent(event) {
             case 'userLeave': {
                 const username = object.user?.username;
                 if (username && username !== 'Anonymous') {
-                     ui.addLogEntry(`${username} left.`, 'info');
+                     ui.addLogEntry(`${username} left.`, 'user-leave'); // Changed from 'info' to 'user-leave'
                     userManager.addEvent(username, 'userLeave', { timestamp });
                 }
                 break;

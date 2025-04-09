@@ -186,6 +186,32 @@ export function togglePasswordInput() {
     console.log(`Password input ${isChecked ? 'shown' : 'hidden'}`);
 }
 
+// --- Import Progress UI Functions ---
+export function showImportProgress(totalRows) {
+    document.getElementById('importProgress').style.display = 'block';
+    document.getElementById('totalRows').textContent = totalRows;
+    document.getElementById('currentProgress').textContent = '0';
+    document.getElementById('usersFound').textContent = '0';
+    document.getElementById('tokensProcessed').textContent = '0';
+    document.getElementById('privateShowsFound').textContent = '0';
+    document.getElementById('spyShowsFound').textContent = '0';
+    document.getElementById('progressBarFill').style.width = '0%';
+}
+
+export function updateImportProgress(current, total, stats = {}) {
+    document.getElementById('currentProgress').textContent = current;
+    document.getElementById('usersFound').textContent = stats.usersFound || '0';
+    document.getElementById('tokensProcessed').textContent = stats.tokensProcessed || '0';
+    document.getElementById('privateShowsFound').textContent = stats.privateShowsFound || '0';
+    document.getElementById('spyShowsFound').textContent = stats.spyShowsFound || '0';
+    const percentage = Math.min(100, Math.round((current / total) * 100));
+    document.getElementById('progressBarFill').style.width = `${percentage}%`;
+}
+
+export function hideImportProgress() {
+    document.getElementById('importProgress').style.display = 'none';
+}
+
 // --- Initial UI Setup ---
 export function initializeUI() {
     settingsPanel.style.display = 'none';

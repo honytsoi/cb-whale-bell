@@ -76,6 +76,18 @@
 
             <div id="dataManagement">
                 <h3>Data Management</h3>
+                <div id="importProgress" style="display: none;">
+                    <div id="importStats">
+                        <p>Processing: <span id="currentProgress">0</span> / <span id="totalRows">0</span> rows</p>
+                        <p>Users Found: <span id="usersFound">0</span></p>
+                        <p>Total Tokens: <span id="tokensProcessed">0</span></p>
+                        <p>Private Shows: <span id="privateShowsFound">0</span></p>
+                        <p>Spy Shows: <span id="spyShowsFound">0</span></p>
+                    </div>
+                    <div class="progressBar">
+                        <div id="progressBarFill"></div>
+                    </div>
+                </div>
                 <label for="tokenHistoryFile">Import Token History (.csv):</label>
                 <input type="file" id="tokenHistoryFile" accept=".csv" style="display: none;">
                 <button id="importTokenHistoryButton">Import CSV</button>
@@ -102,7 +114,7 @@
     </main>
 
     <footer>
-        <p>Chaturbate Whale Bell v1.1 | <a href="https://github.com/honytsoi/cb-whale-bell" target="_blank">Project Page</a></p>
+        <p>Chaturbate Whale Bell v1.1 | <a href="https://github.com/honytsoi/cb-whale-bell" target="_blank">Project Page</a> | <a href="https://cb-whale-bell.adult-webcam-faq.com/" target="_blank"> </a>demo </a> </a></p>
     </footer>
 
     <!-- External Libraries -->

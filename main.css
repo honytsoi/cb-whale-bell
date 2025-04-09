@@ -66,6 +66,33 @@ main {
     border-bottom: none;
 }
 
+#activityLog .info {
+    color: #666;
+}
+
+#activityLog .user-enter {
+    color: #28a745;
+    font-weight: bold;
+}
+
+#activityLog .user-leave {
+    color: #dc3545;
+}
+
+#activityLog .tip {
+    color: #17a2b8;
+    font-weight: bold;
+}
+
+#activityLog .tip-anon {
+    color: #6c757d;
+    font-style: italic;
+}
+
+#activityLog .media {
+    color: #fd7e14;
+}
+
 #settingsPanel {
     background: #fff;
     padding: 1rem;
@@ -174,4 +201,36 @@ footer a:hover {
 .highlight-whale {
     background-color: lightblue;
     font-weight: bold;
+}
+
+#importProgress {
+    margin: 1rem 0;
+    padding: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    background-color: #f9f9f9;
+}
+
+#importStats {
+    margin-bottom: 1rem;
+}
+
+#importStats p {
+    margin: 0.3rem 0;
+    font-size: 0.9rem;
+}
+
+.progressBar {
+    width: 100%;
+    height: 20px;
+    background-color: #eee;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+#progressBarFill {
+    width: 0%;
+    height: 100%;
+    background-color: #5cb85c;
+    transition: width 0.3s ease-in-out;
 }
