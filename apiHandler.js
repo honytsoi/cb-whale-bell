@@ -55,16 +55,21 @@ async function fetchEvents() {
         if (response.ok) {
             const data = await response.json();
             if (data.events && data.events.length > 0) {
-                // console.log(`Processing ${data.events.length} events...`); // Verbose
+                console.log('🌐 Raw events from API:', data.events.map(e => ({
+                    method: e.method,
+                    timestamp: e.timestamp,
+                    object: e.object
+                })));
                 data.events.forEach(processEvent);
-                // ui.displayMessage(`Received ${data.events.length} events.`, 'info', 'connectionStatus', 2000); // Can be annoying
             }
             if (data.nextUrl) {
                 currentUrl = data.nextUrl;
-                requestAnimationFrame(fetchEvents);
+                // Long polling - immediately request the next URL
+                fetchEvents();
             } else {
-                // console.log("No nextUrl provided, waiting before retrying same URL..."); // Verbose
-                 ui.displayMessage(`Polling...`, 'info', 'connectionStatus', NO_NEXT_URL_DELAY_MS);
+                // No nextUrl means we should retry with the same URL after a delay
+                // This should be rare, as the API typically provides a nextUrl
+                ui.displayMessage(`Polling...`, 'info', 'connectionStatus', NO_NEXT_URL_DELAY_MS);
                 fetchTimeoutId = setTimeout(fetchEvents, NO_NEXT_URL_DELAY_MS);
             }
         } else {
@@ -85,6 +90,13 @@ function processEvent(event) {
     if (!event || !event.method || !event.object) { console.warn("Skipping invalid event object:", event); return; }
     const { method, object } = event;
     const timestamp = parseTimestamp(event.timestamp) || new Date().toISOString();
+
+    // Log raw event before processing
+    console.log('⚡ Processing event:', {
+        method,
+        timestamp,
+        object: event.object
+    });
 
     try {
         switch (method) {

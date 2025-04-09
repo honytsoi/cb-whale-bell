@@ -104,7 +104,7 @@ function saveUsersInternal() {
 }
 
 // Debounced save function
-export const saveUsers = debounce(saveUsersInternal, 1500);
+export const saveUsers = debounce(saveUsersInternal, 5000); // Increased from 1500ms to 5000ms
 
 // Returns the number of users pruned
 function handleQuotaExceededError() {
@@ -185,69 +185,36 @@ function updateTokenStats(user, event) {
     const now = Date.now();
     const stats = user.tokenStats;
 
-    console.group(`Stat Update: ${user.username} - Event: ${event.type} (+${amount} tokens)`);
-
-    try {
-        // --- Log Before State ---
-        console.log(`Before - Lifetime: Spent=${stats.totalSpent}, Tips=${stats.totalTips}, Privates=${stats.totalPrivates}, Media=${stats.totalMedia}`);
+    // Remove console.group and detailed logging
+    stats.totalSpent = (stats.totalSpent || 0) + amount;
+    let category = 'other';
         
-        for (const periodKey in stats.timePeriods) {
-            const days = parseInt(periodKey.substring(1));
-            if (isNaN(days)) continue;
-            const periodStart = now - days * 24 * 60 * 60 * 1000;
-            if (eventTime >= periodStart) {
-                console.log(`Before - Period ${periodKey}: Total=${stats.timePeriods[periodKey].total}, Tips=${stats.timePeriods[periodKey].tips}, Privates=${stats.timePeriods[periodKey].privates}, Media=${stats.timePeriods[periodKey].media}`);
-            }
-        }
-
-        // --- Perform Updates ---
-        stats.totalSpent = (stats.totalSpent || 0) + amount;
-        let category = 'other';
-        
-        if (event.type === 'tip') {
-            stats.totalTips = (stats.totalTips || 0) + amount;
-            category = 'tips';
-            console.log(`    -> Added to totalTips. New totalTips: ${stats.totalTips}`);
-        } else if (event.type === 'privateShow' || event.type === 'privateShowSpy') {
-            stats.totalPrivates = (stats.totalPrivates || 0) + amount;
-            category = 'privates';
-            console.log(`    -> Added to totalPrivates. New totalPrivates: ${stats.totalPrivates}`);
-        } else if (event.type === 'mediaPurchase') {
-            stats.totalMedia = (stats.totalMedia || 0) + amount;
-            category = 'media';
-            console.log(`    -> Added to totalMedia. New totalMedia: ${stats.totalMedia}`);
-        }
-
-        // Period stats adjustment
-        for (const periodKey in stats.timePeriods) {
-            const days = parseInt(periodKey.substring(1));
-            if (isNaN(days)) continue;
-            const periodStart = now - days * 24 * 60 * 60 * 1000;
-            if (eventTime >= periodStart) {
-                const periodStats = stats.timePeriods[periodKey];
-                periodStats.total = (periodStats.total || 0) + amount;
-                if (category !== 'other') {
-                    periodStats[category] = (periodStats[category] || 0) + amount;
-                }
-                console.log(`    -> Period ${periodKey}: Total=${periodStats.total}, ${category}=${periodStats[category]}`);
-            }
-        }
-        
-        stats.lastUpdated = new Date().toISOString();
-
-        // --- Log After State ---
-        console.log(`After  - Lifetime: Spent=${stats.totalSpent}, Tips=${stats.totalTips}, Privates=${stats.totalPrivates}, Media=${stats.totalMedia}`);
-        for (const periodKey in stats.timePeriods) {
-            const days = parseInt(periodKey.substring(1));
-            if (isNaN(days)) continue;
-            const periodStart = now - days * 24 * 60 * 60 * 1000;
-            if (eventTime >= periodStart) {
-                console.log(`After  - Period ${periodKey}: Total=${stats.timePeriods[periodKey].total}, Tips=${stats.timePeriods[periodKey].tips}, Privates=${stats.timePeriods[periodKey].privates}, Media=${stats.timePeriods[periodKey].media}`);
-            }
-        }
-    } finally {
-        console.groupEnd();
+    if (event.type === 'tip') {
+        stats.totalTips = (stats.totalTips || 0) + amount;
+        category = 'tips';
+    } else if (event.type === 'privateShow' || event.type === 'privateShowSpy') {
+        stats.totalPrivates = (stats.totalPrivates || 0) + amount;
+        category = 'privates';
+    } else if (event.type === 'mediaPurchase') {
+        stats.totalMedia = (stats.totalMedia || 0) + amount;
+        category = 'media';
     }
+
+    // Period stats adjustment
+    for (const periodKey in stats.timePeriods) {
+        const days = parseInt(periodKey.substring(1));
+        if (isNaN(days)) continue;
+        const periodStart = now - days * 24 * 60 * 60 * 1000;
+        if (eventTime >= periodStart) {
+            const periodStats = stats.timePeriods[periodKey];
+            periodStats.total = (periodStats.total || 0) + amount;
+            if (category !== 'other') {
+                periodStats[category] = (periodStats[category] || 0) + amount;
+            }
+        }
+    }
+        
+    stats.lastUpdated = new Date().toISOString();
 }
 
 export function recalculateAllUserStats() {
@@ -342,51 +309,55 @@ export function markUserOffline(username, shouldSave = true) {
 export function isWhale(username, thresholds) {
     const user = getUser(username);
     if (!user || !user.tokenStats) { return false; }
-    const stats = user.tokenStats; let isUserWhale = false;
-    console.groupCollapsed(`Whale Check: ${username}`);
-    try {
-        console.log(`Stats: Spent=${stats.totalSpent}, Tips=${stats.totalTips}, Privates=${stats.totalPrivates}`);
-        const lifetimeCheck = stats.totalSpent >= thresholds.lifetimeSpendingThreshold;
-        console.log(` -> Lifetime Spending: ${stats.totalSpent} >= ${thresholds.lifetimeSpendingThreshold} ? ${lifetimeCheck}`);
-        if (lifetimeCheck) { console.log(`   * WHALE Reason: Lifetime spending.`); isUserWhale = true; }
-        const lifetimeTipsCheck = stats.totalTips >= thresholds.totalLifetimeTipsThreshold;
-        console.log(` -> Lifetime Tips: ${stats.totalTips} >= ${thresholds.totalLifetimeTipsThreshold} ? ${lifetimeTipsCheck}`);
-        if (lifetimeTipsCheck) { console.log(`   * WHALE Reason: Lifetime tips.`); isUserWhale = true; }
-        const lifetimePrivatesCheck = stats.totalPrivates >= thresholds.totalPrivatesThreshold;
-        console.log(` -> Lifetime Privates: ${stats.totalPrivates} >= ${thresholds.totalPrivatesThreshold} ? ${lifetimePrivatesCheck}`);
-        if (lifetimePrivatesCheck) { console.log(`   * WHALE Reason: Lifetime privates.`); isUserWhale = true; }
-        const recentTipSeconds = thresholds.recentTipTimeframe;
-        if (recentTipSeconds > 0) {
-            const recentTipDays = Math.ceil(recentTipSeconds / 86400);
-            const recentTips = getSpentInPeriod(username, recentTipDays, 'tips');
-            const recentTipsCheck = recentTips >= thresholds.recentTipThreshold;
-            console.log(` -> Recent Tips (~${recentTipDays}d): ${recentTips} >= ${thresholds.recentTipThreshold} ? ${recentTipsCheck}`);
-            if (recentTipsCheck) { console.log(`   * WHALE Reason: Recent tips.`); isUserWhale = true; }
-        } else { console.log(` -> Recent Tips: Skipped (Timeframe=0)`); }
-        const recentPrivateSeconds = thresholds.recentPrivateTimeframe;
-         if (recentPrivateSeconds > 0) {
-            const recentPrivateDays = Math.ceil(recentPrivateSeconds / 86400);
-            const recentPrivates = getSpentInPeriod(username, recentPrivateDays, 'privates');
-            const recentPrivatesCheck = recentPrivates >= thresholds.recentPrivateThreshold;
-            console.log(` -> Recent Privates (~${recentPrivateDays}d): ${recentPrivates} >= ${thresholds.recentPrivateThreshold} ? ${recentPrivatesCheck}`);
-            if (recentPrivatesCheck) { console.log(`   * WHALE Reason: Recent privates.`); isUserWhale = true; }
-        } else { console.log(` -> Recent Privates: Skipped (Timeframe=0)`); }
-        const largeTipThreshold = thresholds.recentLargeTipThreshold;
-        if (largeTipThreshold > 0 && recentTipSeconds > 0) {
-            const periodStart = Date.now() - recentTipSeconds * 1000; let foundLargeTip = false;
-            for (const event of user.eventHistory) {
-                const eventTime = new Date(event.timestamp).getTime(); if (eventTime < periodStart) break;
-                if (event.type === 'tip' && event.data?.amount >= largeTipThreshold) {
-                    console.log(` -> Large Single Tip (${recentTipSeconds}s): Found ${event.data.amount} >= ${largeTipThreshold} ? true`);
-                    console.log(`   * WHALE Reason: Large single tip.`); isUserWhale = true; foundLargeTip = true; break;
-                }
+    const stats = user.tokenStats;
+    
+    // Check lifetime spending first (most common case)
+    if (stats.totalSpent >= thresholds.lifetimeSpendingThreshold) {
+        return true;
+    }
+
+    // Check lifetime tips
+    if (stats.totalTips >= thresholds.totalLifetimeTipsThreshold) {
+        return true;
+    }
+
+    // Check lifetime privates
+    if (stats.totalPrivates >= thresholds.totalPrivatesThreshold) {
+        return true;
+    }
+
+    // Check recent tips if timeframe > 0
+    const recentTipSeconds = thresholds.recentTipTimeframe;
+    if (recentTipSeconds > 0) {
+        const recentTipDays = Math.ceil(recentTipSeconds / 86400);
+        if (getSpentInPeriod(username, recentTipDays, 'tips') >= thresholds.recentTipThreshold) {
+            return true;
+        }
+    }
+
+    // Check recent privates if timeframe > 0
+    const recentPrivateSeconds = thresholds.recentPrivateTimeframe;
+    if (recentPrivateSeconds > 0) {
+        const recentPrivateDays = Math.ceil(recentPrivateSeconds / 86400);
+        if (getSpentInPeriod(username, recentPrivateDays, 'privates') >= thresholds.recentPrivateThreshold) {
+            return true;
+        }
+    }
+
+    // Check large tips if threshold > 0
+    const largeTipThreshold = thresholds.recentLargeTipThreshold;
+    if (largeTipThreshold > 0 && recentTipSeconds > 0) {
+        const periodStart = Date.now() - recentTipSeconds * 1000;
+        for (const event of user.eventHistory) {
+            const eventTime = new Date(event.timestamp).getTime();
+            if (eventTime < periodStart) break;
+            if (event.type === 'tip' && event.data?.amount >= largeTipThreshold) {
+                return true;
             }
-            if (!foundLargeTip) { console.log(` -> Large Single Tip (${recentTipSeconds}s): No tip >= ${largeTipThreshold} found ? false`); }
-        } else { console.log(` -> Large Single Tip: Skipped (Threshold or Timeframe=0)`); }
-        if (!isUserWhale) { console.log(" -> Verdict: Not a whale."); } else { console.log(" -> Verdict: IS A WHALE."); }
-    } catch (error) { console.error(`Error during whale check for ${username}:`, error); }
-    finally { console.groupEnd(); }
-    return isUserWhale;
+        }
+    }
+
+    return false;
 }
 
 // --- User Data Management ---
