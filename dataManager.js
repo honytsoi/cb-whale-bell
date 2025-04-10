@@ -15,42 +15,77 @@ const PRIVATE_SHOW_GROUPING_THRESHOLD_SECONDS = 30; // Max time gap for grouping
 // --- CSV Import ---
 
 export function handleTokenHistoryImport(file) {
-    console.log(`Handling token history import: ${file.name}`);
+    console.log(`[DEBUG] handleTokenHistoryImport called with file:`, {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: new Date(file.lastModified).toISOString(),
+        timestamp: new Date().toISOString()
+    });
     ui.displayMessage('Starting CSV import...', 'info', 'dataManagementResult', 0); // No timeout
 
     if (!file || !file.name.toLowerCase().endsWith('.csv')) {
+        console.log('[DEBUG] Invalid file type rejection');
         ui.displayMessage('Invalid file type. Please select a .csv file.', 'error', 'dataManagementResult');
         return;
     }
 
     if (!isFileSizeValid(file)) {
+        console.log('[DEBUG] File size rejection');
         ui.displayMessage(`File size exceeds ${MAX_FILE_SIZE_MB}MB limit.`, 'error', 'dataManagementResult');
         return;
     }
+
+    let isProcessing = false;
+    console.log('[DEBUG] Starting PapaParse process');
 
     // Use PapaParse to read the file
     Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
-            console.log("CSV parsing complete:", results);
-            if (results.errors.length > 0) {
-                console.error("CSV parsing errors:", results.errors);
-                ui.displayMessage(`CSV parsing error: ${results.errors[0].message} (Row ${results.errors[0].row})`, 'error', 'dataManagementResult');
-                return;
-            }
-            if (!validateCsvHeaders(results.meta.fields)) {
-                 ui.displayMessage('CSV missing required columns (User, Token change, Timestamp, Note).', 'error', 'dataManagementResult');
-                return;
-            }
+            console.log("[DEBUG] PapaParse complete callback:", {
+                totalRows: results.data.length,
+                errors: results.errors.length,
+                isProcessing: isProcessing,
+                timestamp: new Date().toISOString()
+            });
             
-            // Show progress UI before starting processing
-            ui.showImportProgress(results.data.length);
-            setTimeout(() => processCsvData(results.data), 0); // Process async
+            if (isProcessing) {
+                console.log("[DEBUG] Already processing a file, skipping duplicate callback");
+                return;
+            }
+            isProcessing = true;
+
+            try {
+                if (results.errors.length > 0) {
+                    console.error("[DEBUG] CSV parsing errors:", results.errors);
+                    ui.displayMessage(`CSV parsing error: ${results.errors[0].message} (Row ${results.errors[0].row})`, 'error', 'dataManagementResult');
+                    return;
+                }
+                if (!validateCsvHeaders(results.meta.fields)) {
+                    console.log('[DEBUG] Invalid headers rejection:', results.meta.fields);
+                    ui.displayMessage('CSV missing required columns (User, Token change, Timestamp, Note).', 'error', 'dataManagementResult');
+                    return;
+                }
+                
+                // Show progress UI before starting processing
+                ui.showImportProgress(results.data.length);
+                console.log('[DEBUG] Starting processCsvData');
+                setTimeout(() => processCsvData(results.data), 0); // Process async
+            } catch (error) {
+                console.error("[DEBUG] Error processing CSV data:", error);
+                ui.displayMessage(`Error processing CSV: ${error.message}`, 'error', 'dataManagementResult');
+                ui.hideImportProgress();
+            } finally {
+                isProcessing = false;
+            }
         },
         error: (error) => {
-            console.error("PapaParse error:", error);
+            console.error("[DEBUG] PapaParse error:", error);
             ui.displayMessage(`Failed to parse CSV: ${error.message}`, 'error', 'dataManagementResult');
+            ui.hideImportProgress();
+            isProcessing = false;
         }
     });
 }
@@ -318,6 +353,11 @@ function processCsvData(data) {
         if (spyShowsCreated > 0) summary += ` Created ${spyShowsCreated} Spy Show groups.`;
         ui.displayMessage(summary, 'success', 'dataManagementResult', 15000);
         console.log(summary);
+
+        // If we're in the setup wizard, advance to the next step
+        if (document.querySelector('.setup-step[data-step="2"]').style.display !== 'none') {
+            ui.setupNextStep();
+        }
     }
 
     // Start processing with initial chunk

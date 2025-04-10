@@ -14,6 +14,9 @@ let fetchTimeoutId = null; // To manage retry timeouts
 const RETRY_DELAY_MS = 5000; // Delay before retrying after an error
 const NO_NEXT_URL_DELAY_MS = 3000; // Delay when API doesn't provide nextUrl
 
+let eventLoopInterval = null;
+let isEventLoopRunning = false;
+
 export function isApiConnected() {
     return isConnected;
 }
@@ -186,12 +189,38 @@ export function initializeAPI() {
     }
 }
 
+export function startEventLoop() {
+    if (isEventLoopRunning || !currentUrl) return;
+    
+    isEventLoopRunning = true;
+    eventLoopInterval = setInterval(async () => {
+        try {
+            const events = await fetchEvents();
+            processEvents(events);
+        } catch (error) {
+            console.error('Error in event loop:', error);
+            if (error.message.includes('401') || error.message.includes('403')) {
+                stopEventLoop();
+                disconnect();
+                ui.displayMessage('API connection expired. Please reconnect.', 'error');
+            }
+        }
+    }, 1000); // Poll every second
+}
+
+export function stopEventLoop() {
+    if (!isEventLoopRunning) return;
+    
+    clearInterval(eventLoopInterval);
+    eventLoopInterval = null;
+    isEventLoopRunning = false;
+}
+
 export function disconnect() {
-    console.log("Disconnecting from API...");
-    if (!isConnected) { console.log("Already disconnected."); return; }
-    stopFetching = true; isConnected = false;
-    if (fetchTimeoutId) { clearTimeout(fetchTimeoutId); fetchTimeoutId = null; }
+    stopEventLoop();
+    currentUrl = null;
+    broadcasterName = null;
     ui.updateConnectionStatus(false);
-    ui.displayMessage("Disconnected from Events API.", 'info', 'apiEndpoint');
+    ui.displayMessage('Disconnected from Events API.', 'info');
     ui.addLogEntry("Disconnected from Events API.", 'info');
 }

@@ -73,6 +73,19 @@ function playNotificationSound() {
 
 // --- UI Update Functions ---
 
+// --- Toast Notification System ---
+function showToast(message, duration = 3000) {
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    // Remove toast after animation
+    setTimeout(() => {
+        document.body.removeChild(toast);
+    }, duration);
+}
+
 export function updateConnectionStatus(status, url = null, broadcaster = null) {
     console.log(`Updating connection status UI: ${status}`);
     if (status === 'connecting') {
@@ -80,6 +93,7 @@ export function updateConnectionStatus(status, url = null, broadcaster = null) {
         connectionStatusElement.style.color = 'orange';
         apiEndpointElement.textContent = '';
         broadcasterNameDisplayElement.textContent = '';
+        document.getElementById('connectUrl').classList.add('loading');
     } else if (status === true) { // Connected
         connectionStatusElement.textContent = 'Status: Connected';
         connectionStatusElement.style.color = 'lightgreen';
@@ -89,15 +103,21 @@ export function updateConnectionStatus(status, url = null, broadcaster = null) {
         document.getElementById('connectUrl').disabled = true;
         document.getElementById('scannedUrl').disabled = true;
         document.getElementById('disconnectApi').disabled = false;
+        document.getElementById('connectUrl').classList.remove('loading');
+
+        // Automatically finish setup and start monitoring
+        finishSetup();
+        startMonitoring();
     } else { // Disconnected or Error
         connectionStatusElement.textContent = 'Status: Disconnected';
-        connectionStatusElement.style.color = 'salmon';
-         apiEndpointElement.textContent = '';
-         broadcasterNameDisplayElement.textContent = '';
-         document.getElementById('startScan').disabled = false;
-         document.getElementById('connectUrl').disabled = false;
-         document.getElementById('scannedUrl').disabled = false;
-         document.getElementById('disconnectApi').disabled = true;
+        connectionStatusElement.style.color = 'red';
+        apiEndpointElement.textContent = '';
+        broadcasterNameDisplayElement.textContent = '';
+        document.getElementById('startScan').disabled = false;
+        document.getElementById('connectUrl').disabled = false;
+        document.getElementById('scannedUrl').disabled = false;
+        document.getElementById('disconnectApi').disabled = true;
+        document.getElementById('connectUrl').classList.remove('loading');
     }
 }
 
@@ -117,12 +137,16 @@ export function displayMessage(message, type = 'info', elementId = 'dataManageme
         element.className = type;
         if (durationMs > 0) {
             setTimeout(() => {
-                if (element.textContent === message) { element.textContent = ''; element.className = ''; }
+                if (element.textContent === message) { 
+                    element.textContent = ''; 
+                    element.className = ''; 
+                }
             }, durationMs);
         }
-    } else {
-        console.warn(`UI element with ID "${elementId}" not found for message:`, message);
-        alert(`${type.toUpperCase()}: ${message}`);
+    }
+    // Also show as toast for important messages
+    if (type === 'error' || type === 'success') {
+        showToast(message);
     }
 }
 
@@ -169,9 +193,32 @@ export function addLogEntry(message, type = 'info') {
 
 export function triggerWhaleNotification(username) {
     console.log(`WHALE ALERT: ${username} entered! 🐳`);
-    addLogEntry(`${username} entered! 🐳`, 'whale-enter');
-    playNotificationSound(); // Use Web Audio API sound
-    // Optional: Add a more prominent visual cue
+    
+    // Create whale notification element
+    const notification = document.createElement('div');
+    notification.className = 'whale-notification';
+    notification.innerHTML = `
+        <strong>🐳 Whale Alert!</strong>
+        <p>${username} has entered!</p>
+    `;
+    
+    // Add to activity log with animation
+    const li = document.createElement('li');
+    li.appendChild(notification);
+    li.classList.add('whale-enter');
+    activityLogElement.prepend(li);
+    
+    // Show toast notification
+    showToast(`🐳 Whale Alert: ${username} has entered!`);
+    
+    // Play sound
+    playNotificationSound();
+    
+    // Clean up old entries
+    const maxLogEntries = 100;
+    while (activityLogElement.children.length > maxLogEntries) {
+        activityLogElement.removeChild(activityLogElement.lastChild);
+    }
 }
 
 export function testSound() {
@@ -188,7 +235,9 @@ export function togglePasswordInput() {
 
 // --- Import Progress UI Functions ---
 export function showImportProgress(totalRows) {
-    document.getElementById('importProgress').style.display = 'block';
+    const importProgress = document.getElementById('importProgress');
+    importProgress.style.display = 'block';
+    document.getElementById('importTokenHistoryButton').classList.add('loading');
     document.getElementById('totalRows').textContent = totalRows;
     document.getElementById('currentProgress').textContent = '0';
     document.getElementById('usersFound').textContent = '0';
@@ -210,24 +259,245 @@ export function updateImportProgress(current, total, stats = {}) {
 
 export function hideImportProgress() {
     document.getElementById('importProgress').style.display = 'none';
+    document.getElementById('importTokenHistoryButton').classList.remove('loading');
 }
 
-// --- Initial UI Setup ---
-export function initializeUI() {
-    settingsPanel.style.display = 'none';
-    passwordInput.style.display = 'none';
-    document.getElementById('cancelScan').style.display = 'none';
-    document.getElementById('qrScanner').style.display = 'none';
-    updateConnectionStatus(false);
-    addLogEntry("Application initialized.", "info");
+// --- Setup Wizard Functions ---
+let currentSetupStep = 1;
 
-    // Remove or hide the sound file selector if it exists
-    if (bellSoundSelect) {
-        bellSoundSelect.style.display = 'none';
-        // Also hide its label if it has one
-        const bellSoundLabel = document.querySelector(`label[for='${bellSoundSelect.id}']`);
-        if (bellSoundLabel) {
-            bellSoundLabel.style.display = 'none';
-        }
+export function showSetupWizard() {
+    const setupWizard = document.getElementById('setupWizard');
+    const mainArea = document.getElementById('mainArea');
+    
+    setupWizard.style.display = 'block';
+    mainArea.style.display = 'none';
+    showSetupStep(1);
+}
+
+function showSetupStep(stepNumber) {
+    document.querySelectorAll('.setup-step').forEach(step => {
+        step.style.display = 'none';
+    });
+    
+    const currentStep = document.querySelector(`.setup-step[data-step="${stepNumber}"]`);
+    if (currentStep) {
+        currentStep.style.display = 'block';
+        currentSetupStep = stepNumber;
     }
+}
+
+export function setupNextStep() {
+    const currentStep = document.querySelector(`.setup-step[data-step="${currentSetupStep}"]`);
+    const nextStep = document.querySelector(`.setup-step[data-step="${currentSetupStep + 1}"]`);
+    
+    // Save thresholds when moving from step 3
+    if (currentSetupStep === 3) {
+        const lifetimeSpending = document.getElementById('lifetimeSpendingThreshold').value;
+        const recentTip = document.getElementById('recentTipThreshold').value;
+        
+        // Update config with onboarding values
+        const config = configManager.getConfig();
+        config.lifetimeSpendingThreshold = parseInt(lifetimeSpending);
+        config.recentTipThreshold = parseInt(recentTip);
+        configManager.saveConfig(config);
+    }
+    
+    if (currentStep && nextStep) {
+        currentStep.style.animation = 'fadeOut 0.3s ease-out forwards';
+        setTimeout(() => {
+            currentStep.style.display = 'none';
+            nextStep.style.display = 'block';
+            nextStep.style.animation = 'fadeIn 0.3s ease-out';
+            currentSetupStep++;
+        }, 300);
+    }
+}
+
+export function setupSkipStep() {
+    showSetupStep(currentSetupStep + 1);
+}
+
+export function finishSetup() {
+    const setupWizard = document.getElementById('setupWizard');
+    const mainArea = document.getElementById('mainArea');
+    
+    setupWizard.style.display = 'none';
+    mainArea.style.display = 'block';
+    
+    // Save setup completion status
+    localStorage.setItem('setupCompleted', 'true');
+    
+    // Initialize main UI first so elements are visible
+    initializeUI();
+    
+    // Then update displays after elements are visible
+    updateThresholdDisplay();
+}
+
+export function updateThresholdDisplay() {
+    const currentThresholds = document.getElementById('currentThresholds');
+    if (!currentThresholds) {
+        console.error("#currentThresholds container not found in the DOM. Aborting update.");
+        return;
+    }
+
+    const thresholdDisplay = currentThresholds.querySelector('.threshold-display');
+    if (!thresholdDisplay) {
+        console.error("#currentThresholds .threshold-display element not found in the DOM. Aborting update.");
+        return;
+    }
+
+    const config = configManager.getConfig();
+    thresholdDisplay.innerHTML = `
+        <div class="threshold-item">
+            <span>Lifetime Spending: ${config.lifetimeSpendingThreshold} tokens</span>
+        </div>
+        <div class="threshold-item">
+            <span>Recent Tip: ${config.recentTipThreshold} tokens in ${config.recentTipTimeframe}s</span>
+        </div>
+    `;
+}
+
+export function updateWhaleStats() {
+    const statsDisplay = document.querySelector('.stats-display');
+    // Add whale statistics display logic here
+    statsDisplay.innerHTML = `
+        <div class="stats-item">
+            <span>Whales Online: 0</span>
+        </div>
+        <div class="stats-item">
+            <span>Total Whale Tips Today: 0</span>
+        </div>
+    `;
+}
+
+// --- Settings Tab Management ---
+function initializeSettingsTabs() {
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const tabId = button.getAttribute('data-tab');
+            
+            // Update active states
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            tabContents.forEach(content => content.classList.remove('active'));
+            
+            button.classList.add('active');
+            document.getElementById(tabId + 'Settings').classList.add('active');
+        });
+    });
+}
+
+// --- Monitoring Controls ---
+let isMonitoring = false;
+
+export function startMonitoring() {
+    isMonitoring = true;
+    document.getElementById('stopMonitoring').style.display = 'inline-block';
+    addLogEntry('Monitoring started.', 'info');
+}
+
+export function stopMonitoring() {
+    isMonitoring = false;
+    document.getElementById('stopMonitoring').style.display = 'none';
+    addLogEntry('Monitoring stopped.', 'info');
+}
+
+// --- Auto-Pruning Management ---
+export function initializeAutoPruning() {
+    const enableAutoPruning = document.getElementById('enableAutoPruning');
+    const pruneThreshold = document.getElementById('pruneThreshold');
+    const pruneAmount = document.getElementById('pruneAmount');
+    
+    // Load saved auto-pruning settings
+    const savedSettings = JSON.parse(localStorage.getItem('autoPruningSettings') || '{}');
+    enableAutoPruning.checked = savedSettings.enabled || false;
+    pruneThreshold.value = savedSettings.threshold || 90;
+    pruneAmount.value = savedSettings.amount || 20;
+    
+    // Save settings when changed
+    const saveAutoPruningSettings = () => {
+        const settings = {
+            enabled: enableAutoPruning.checked,
+            threshold: parseInt(pruneThreshold.value),
+            amount: parseInt(pruneAmount.value)
+        };
+        localStorage.setItem('autoPruningSettings', JSON.stringify(settings));
+    };
+    
+    enableAutoPruning.addEventListener('change', saveAutoPruningSettings);
+    pruneThreshold.addEventListener('change', saveAutoPruningSettings);
+    pruneAmount.addEventListener('change', saveAutoPruningSettings);
+}
+
+// Modify initializeUI to check for first-time setup
+export function initializeUI() {
+    const setupCompleted = localStorage.getItem('setupCompleted');
+
+    if (!setupCompleted) {
+        showSetupWizard();
+    } else {
+        const setupWizard = document.getElementById('setupWizard');
+        const mainArea = document.getElementById('mainArea');
+
+        setupWizard.style.display = 'none';
+        mainArea.style.display = 'block';
+
+        // Ensure settings button is visible
+        const settingsButton = document.getElementById('settingsButton');
+        if (settingsButton) {
+            settingsButton.style.display = 'inline-block';
+            settingsButton.addEventListener('click', toggleSettingsPanel);
+        }
+
+        // Load thresholds from localStorage
+        loadThresholdsFromLocalStorage();
+
+        // Initialize new components
+        initializeSettingsTabs();
+        initializeAutoPruning();
+
+        updateConnectionStatus(false);
+
+        // Delay updating the threshold display to ensure DOM is fully rendered
+        setTimeout(() => {
+            updateThresholdDisplay();
+        }, 0);
+
+        updateWhaleStats();
+
+        addLogEntry("Application initialized.", "info");
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initializeUI();
+});
+
+export function saveThresholdsToLocalStorage() {
+    const config = configManager.getConfig();
+    localStorage.setItem('lifetimeSpendingThreshold', config.lifetimeSpendingThreshold);
+    localStorage.setItem('recentTipThreshold', config.recentTipThreshold);
+    localStorage.setItem('recentTipTimeframe', config.recentTipTimeframe);
+    localStorage.setItem('recentLargeTipThreshold', config.recentLargeTipThreshold);
+    localStorage.setItem('recentPrivateThreshold', config.recentPrivateThreshold);
+    localStorage.setItem('recentPrivateTimeframe', config.recentPrivateTimeframe);
+    localStorage.setItem('totalPrivatesThreshold', config.totalPrivatesThreshold);
+    localStorage.setItem('totalLifetimeTipsThreshold', config.totalLifetimeTipsThreshold);
+    console.log('Thresholds saved to localStorage.');
+}
+
+export function loadThresholdsFromLocalStorage() {
+    const config = configManager.getConfig();
+    config.lifetimeSpendingThreshold = parseInt(localStorage.getItem('lifetimeSpendingThreshold')) || config.lifetimeSpendingThreshold;
+    config.recentTipThreshold = parseInt(localStorage.getItem('recentTipThreshold')) || config.recentTipThreshold;
+    config.recentTipTimeframe = parseInt(localStorage.getItem('recentTipTimeframe')) || config.recentTipTimeframe;
+    config.recentLargeTipThreshold = parseInt(localStorage.getItem('recentLargeTipThreshold')) || config.recentLargeTipThreshold;
+    config.recentPrivateThreshold = parseInt(localStorage.getItem('recentPrivateThreshold')) || config.recentPrivateThreshold;
+    config.recentPrivateTimeframe = parseInt(localStorage.getItem('recentPrivateTimeframe')) || config.recentPrivateTimeframe;
+    config.totalPrivatesThreshold = parseInt(localStorage.getItem('totalPrivatesThreshold')) || config.totalPrivatesThreshold;
+    config.totalLifetimeTipsThreshold = parseInt(localStorage.getItem('totalLifetimeTipsThreshold')) || config.totalLifetimeTipsThreshold;
+    console.log('Thresholds loaded from localStorage.');
 }

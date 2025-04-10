@@ -3,171 +3,105 @@
 import * as apiHandler from './apiHandler.js';
 import * as ui from './ui.js';
 
-// Create a QRScanner object to export
-export const QRScanner = {
-    stream: null,
-    animationFrameId: null,
-    canvasContext: null,
-    videoElement: null,
-    canvasElement: null,
-    startScanButton: null,
-    cancelScanButton: null,
-    urlInput: null,
+// QR Scanner implementation
+export class QRScanner {
+    static video = null;
+    static canvas = null;
+    static scanning = false;
 
-    initialize() {
-        // Initialize DOM elements
-        this.videoElement = document.getElementById('qrScanner');
-        this.canvasElement = document.getElementById('qrCanvas');
-        this.startScanButton = document.getElementById('startScan');
-        this.cancelScanButton = document.getElementById('cancelScan');
-        this.urlInput = document.getElementById('scannedUrl');
+    static initialize() {
+        this.video = document.getElementById('qrScanner');
+        this.canvas = document.getElementById('qrCanvas');
+    }
 
-        // Initialize canvas context
-        if (this.canvasElement) {
-            this.canvasContext = this.canvasElement.getContext('2d', { willReadFrequently: true });
-        } else {
-            console.error("QR Canvas element not found!");
-        }
-    },
-
-    startScan() {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            ui.displayMessage('Camera access (getUserMedia) not supported by this browser.', 'error', 'apiEndpoint');
-            return;
-        }
-        if (!QRScanner.canvasContext) {
-            ui.displayMessage('Canvas context not available for QR scanning.', 'error', 'apiEndpoint');
-            return;
-        }
-        if (!window.jsQR) {
-            ui.displayMessage('jsQR library not loaded. Cannot scan.', 'error', 'apiEndpoint');
-            return;
-        }
-
-        console.log("Starting QR code scan...");
-        ui.displayMessage('Requesting camera access...', 'info', 'apiEndpoint');
-        QRScanner.startScanButton.disabled = true;
-        QRScanner.cancelScanButton.style.display = 'inline-block';
-        QRScanner.videoElement.style.display = 'block';
-
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-            .then(QRScanner.handleStream)
-            .catch(QRScanner.handleError);
-    },
-
-    handleStream(mediaStream) {
-        QRScanner.stream = mediaStream;
-        QRScanner.videoElement.srcObject = mediaStream;
-        QRScanner.videoElement.setAttribute("playsinline", true);
-        QRScanner.videoElement.play()
-            .then(() => {
-                console.log("Camera stream active and playing.");
-                ui.displayMessage('Camera active. Point at QR code.', 'info', 'apiEndpoint');
-                requestAnimationFrame(QRScanner.scanLoop);
-            })
-            .catch(error => {
-                console.error("Error playing video stream:", error);
-                ui.displayMessage(`Error starting camera stream: ${error.message}`, 'error', 'apiEndpoint');
-                QRScanner.stopScan(false);
-            });
-    },
-
-    handleError(error) {
-        console.error("Error accessing camera:", error);
-        let message = `Camera Error: ${error.name}`;
-        if (error.message) message += ` - ${error.message}`;
-        ui.displayMessage(message, 'error', 'apiEndpoint');
-        QRScanner.stopScan(false);
-    },
-
-    scanLoop() {
-        if (!QRScanner.stream || !QRScanner.videoElement || 
-            QRScanner.videoElement.readyState !== QRScanner.videoElement.HAVE_ENOUGH_DATA || 
-            !QRScanner.canvasContext) {
-            if (QRScanner.animationFrameId) {
-                console.warn("Scan loop cancelled due to missing stream or elements.");
-                QRScanner.stopScan(false);
-            }
-            return;
-        }
-
+    static async startScan() {
         try {
-            if (QRScanner.canvasElement.height !== QRScanner.videoElement.videoHeight || 
-                QRScanner.canvasElement.width !== QRScanner.videoElement.videoWidth) {
-                QRScanner.canvasElement.height = QRScanner.videoElement.videoHeight;
-                QRScanner.canvasElement.width = QRScanner.videoElement.videoWidth;
-                if(QRScanner.canvasElement.height === 0 || QRScanner.canvasElement.width === 0) {
-                    console.warn("Video dimensions are zero, skipping frame.");
-                    QRScanner.animationFrameId = requestAnimationFrame(QRScanner.scanLoop);
-                    return;
-                }
-            }
+            this.video.style.display = 'block';
+            document.getElementById('cancelScan').style.display = 'inline-block';
+            document.getElementById('startScan').classList.add('loading');
 
-            QRScanner.canvasContext.drawImage(QRScanner.videoElement, 0, 0, 
-                QRScanner.canvasElement.width, QRScanner.canvasElement.height);
+            // Add overlay with scanning animation
+            const overlay = document.createElement('div');
+            overlay.className = 'qr-scanner-overlay';
+            overlay.innerHTML = `
+                <div class="scanning-line"></div>
+                <div class="corner-marker top-left"></div>
+                <div class="corner-marker top-right"></div>
+                <div class="corner-marker bottom-left"></div>
+                <div class="corner-marker bottom-right"></div>
+            `;
+            this.video.parentElement.appendChild(overlay);
 
-            const imageData = QRScanner.canvasContext.getImageData(0, 0, 
-                QRScanner.canvasElement.width, QRScanner.canvasElement.height);
-
-            const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: "dontInvert"
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
             });
-
-            if (code && code.data) {
-                console.log("QR Code detected:", code.data);
-                QRScanner.handleCodeFound(code.data);
-            } else {
-                QRScanner.animationFrameId = requestAnimationFrame(QRScanner.scanLoop);
-            }
+            
+            this.video.srcObject = stream;
+            this.video.play();
+            this.scanning = true;
+            this.scan();
         } catch (error) {
-            console.error("Error during QR scan loop:", error);
-            ui.displayMessage('Error during scanning. See console.', 'error', 'apiEndpoint');
-            QRScanner.stopScan(false);
-        }
-    },
-
-    handleCodeFound(url) {
-        if (url && url.startsWith('https://eventsapi.chaturbate.com/events/')) {
-            console.log("Valid Events API URL found:", url);
-            ui.displayMessage('Valid QR code found! Connecting...', 'success', 'apiEndpoint');
-            QRScanner.stopScan(true);
-
-            if (QRScanner.urlInput) {
-                QRScanner.urlInput.value = url;
-                QRScanner.urlInput.disabled = true;
-            }
-
-            apiHandler.connectWithUrl(url);
-        } else {
-            console.warn("Invalid QR code data:", url);
-            ui.displayMessage('Scanned code is not a valid Events API URL. Try again.', 'error', 'apiEndpoint');
-            QRScanner.animationFrameId = requestAnimationFrame(QRScanner.scanLoop);
-        }
-    },
-
-    stopScan(success = false) {
-        console.log("Stopping QR code scan...");
-        if (QRScanner.animationFrameId) {
-            cancelAnimationFrame(QRScanner.animationFrameId);
-            QRScanner.animationFrameId = null;
-        }
-        if (QRScanner.stream) {
-            QRScanner.stream.getTracks().forEach(track => track.stop());
-            QRScanner.stream = null;
-        }
-        if (QRScanner.videoElement) {
-            QRScanner.videoElement.srcObject = null;
-            QRScanner.videoElement.style.display = 'none';
-        }
-        if (QRScanner.canvasContext) {
-            QRScanner.canvasContext.clearRect(0, 0, QRScanner.canvasElement.width, QRScanner.canvasElement.height);
-        }
-
-        QRScanner.startScanButton.disabled = apiHandler.isApiConnected();
-        QRScanner.cancelScanButton.style.display = 'none';
-
-        if (!success && !apiHandler.isApiConnected()) {
-            ui.displayMessage('Scan cancelled.', 'info', 'apiEndpoint');
+            console.error('Error accessing camera:', error);
+            this.stopScan(true);
+            throw new Error('Could not access camera. Please make sure you have granted camera permissions.');
         }
     }
-};
+
+    static stopScan(error = false) {
+        this.scanning = false;
+        if (this.video.srcObject) {
+            this.video.srcObject.getTracks().forEach(track => track.stop());
+        }
+        this.video.style.display = 'none';
+        document.getElementById('cancelScan').style.display = 'none';
+        document.getElementById('startScan').classList.remove('loading');
+
+        // Remove overlay if it exists
+        const overlay = document.querySelector('.qr-scanner-overlay');
+        if (overlay) {
+            overlay.remove();
+        }
+
+        if (error) {
+            // Visual feedback for error
+            const startScanBtn = document.getElementById('startScan');
+            startScanBtn.classList.add('error-shake');
+            setTimeout(() => startScanBtn.classList.remove('error-shake'), 500);
+        }
+    }
+
+    static scan() {
+        if (!this.scanning) return;
+
+        requestAnimationFrame(() => this.scan());
+
+        this.canvas.width = this.video.videoWidth;
+        this.canvas.height = this.video.videoHeight;
+        const ctx = this.canvas.getContext('2d');
+        ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
+
+        try {
+            const imageData = ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+            if (code) {
+                this.stopScan();
+                const urlInput = document.getElementById('setupScannedUrl'); // Use the same field for both scanning and manual entry
+                urlInput.value = code.data;
+                
+                // Visual success feedback
+                urlInput.classList.add('success-highlight');
+                setTimeout(() => urlInput.classList.remove('success-highlight'), 2000);
+                
+                // Auto-connect after successful scan
+                document.getElementById('connectUrl').click();
+            }
+        } catch (error) {
+            console.error('QR scanning error:', error);
+        }
+    }
+}

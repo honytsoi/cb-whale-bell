@@ -5,125 +5,209 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chaturbate Whale Bell</title>
     <link rel="stylesheet" href="main.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
 </head>
 <body>
     <header>
         <h1>Chaturbate Whale Bell</h1>
         <div id="connectionStatus">Status: Disconnected</div>
-        <button id="settingsButton">Settings</button>
+        <div class="settings-container">
+            <button id="settingsButton" aria-label="Settings">⚙️</button>
+            <div class="keyboard-shortcuts-tooltip">
+                <h4>Keyboard Shortcuts:</h4>
+                <ul>
+                    <li><kbd>Space</kbd> Start/Stop Monitoring</li>
+                    <li><kbd>Ctrl</kbd>+<kbd>,</kbd> Open Settings</li>
+                    <li><kbd>Ctrl</kbd>+<kbd>S</kbd> Save Config</li>
+                    <li><kbd>Ctrl</kbd>+<kbd>I</kbd> Import History</li>
+                    <li><kbd>Ctrl</kbd>+<kbd>E</kbd> Export Data</li>
+                    <li><kbd>Esc</kbd> Close Settings</li>
+                </ul>
+                <small>Note: Use <kbd>⌘</kbd> instead of <kbd>Ctrl</kbd> on Mac</small>
+            </div>
+        </div>
     </header>
 
     <main>
+        <div id="setupWizard" style="display: none;">
+            <div class="setup-step" data-step="1">
+                <h2>Welcome to Whale Bell! 🐳</h2>
+                <p>Let's get you set up in just a few steps.</p>
+                <button class="next-step">Get Started</button>
+            </div>
+            
+            <div class="setup-step" data-step="2" style="display: none;">
+                <h2>Import Your Token History (Optional)</h2>
+                <p>Import your token history to get personalized threshold suggestions.</p>
+                <button id="importTokenHistoryButton">Import History</button>
+                <button class="skip-step">Skip This Step</button>
+            </div>
+            
+            <div class="setup-step" data-step="3" style="display: none;">
+                <h2>Set Your Whale Thresholds</h2>
+                <div id="thresholdSetup">
+                    <label for="lifetimeSpendingThreshold">Lifetime Spending:</label>
+                    <input type="number" id="lifetimeSpendingThreshold" value="10000">
+                    <label for="recentTipThreshold">Recent Tip Amount:</label>
+                    <input type="number" id="recentTipThreshold" value="5000">
+                    <button id="suggestThresholds">Suggest Thresholds</button>
+                </div>
+                <button class="next-step">Continue</button>
+            </div>
+            
+            <div class="setup-step" data-step="4" style="display: none;">
+                <h2>Connect to Your Room</h2>
+                <p>Scan the QR code from your Chaturbate room or enter the URL manually.</p>
+                <button id="startScan">Scan QR Code</button>
+                <video id="qrScanner" style="display: none;"></video>
+                <canvas id="qrCanvas" style="display: none;"></canvas>
+                <button id="cancelScan" style="display: none;">Cancel Scan</button>
+                <div class="manual-url">
+                    <label for="setupScannedUrl">Or enter URL manually:</label>
+                    <input type="text" id="setupScannedUrl" placeholder="Events API URL">
+                    <button id="connectUrl">Connect</button>
+                </div>
+            </div>
+        </div>
+
         <div id="mainArea">
-            <h2>Recent Activity</h2>
-            <ul id="activityLog">
-                <!-- Activity log entries will be added here -->
-            </ul>
-            <div id="currentThresholds">
-                <h3>Current Whale Thresholds</h3>
-                <!-- Thresholds will be displayed here -->
+            <div class="status-bar">
+                <div id="currentThresholds">
+                    <h3>Current Whale Thresholds</h3>
+                    <div class="threshold-display"></div>
+                </div>
+                <div id="whaleStats">
+                    <h3>Whale Stats</h3>
+                    <div class="stats-display"></div>
+                </div>
+            </div>
+
+            <div class="activity-section">
+                <h2>Recent Activity</h2>
+                <ul id="activityLog"></ul>
             </div>
         </div>
 
         <section id="settingsPanel" style="display: none;">
             <h2>Settings</h2>
 
-            <div id="connectionSettings">
-                <h3>Connection</h3>
-                <button id="startScan">Scan QR Code</button>
-                <video id="qrScanner" style="display: none; width: 300px;"></video>
-                <canvas id="qrCanvas" style="display: none;"></canvas>
-                <button id="cancelScan" style="display: none;">Cancel Scan</button>
-                <br>
-                <label for="scannedUrl">Events API URL:</label>
-                <input type="text" id="scannedUrl" placeholder="Paste URL here">
-                <button id="connectUrl">Connect</button>
-                <button id="disconnectApi">Disconnect</button>
-                <div id="apiEndpoint"></div>
-                <div id="broadcasterNameDisplay"></div>
+            <div class="settings-tabs">
+                <button class="tab-button active" data-tab="basic">Basic Settings</button>
+                <button class="tab-button" data-tab="advanced">Advanced Settings</button>
             </div>
 
-            <div id="whaleThresholdsSettings">
-                <h3>Whale Thresholds</h3>
-                <label for="lifetimeSpendingThreshold">Lifetime Spending:</label>
-                <input type="number" id="lifetimeSpendingThreshold" value="10000"><br>
-                <label for="recentTipThreshold">Recent Tip Amount:</label>
-                <input type="number" id="recentTipThreshold" value="1000"><br>
-                <label for="recentTipTimeframe">Recent Tip Timeframe (seconds):</label>
-                <input type="number" id="recentTipTimeframe" value="3600"><br>
-                 <label for="recentLargeTipThreshold">Recent Large Tip Amount:</label>
-                <input type="number" id="recentLargeTipThreshold" value="5000"><br>
-                <label for="recentPrivateThreshold">Recent Private Amount:</label>
-                <input type="number" id="recentPrivateThreshold" value="2000"><br>
-                <label for="recentPrivateTimeframe">Recent Private Timeframe (seconds):</label>
-                <input type="number" id="recentPrivateTimeframe" value="86400"><br>
-                <label for="totalPrivatesThreshold">Total Privates Amount:</label>
-                <input type="number" id="totalPrivatesThreshold" value="10000"><br>
-                <label for="totalLifetimeTipsThreshold">Total Lifetime Tips Amount:</label>
-                <input type="number" id="totalLifetimeTipsThreshold" value="5000"><br>
-                <button id="suggestThresholds">Suggest Thresholds</button>
-            </div>
-
-            <div id="soundSettings">
-                <h3>Sound</h3>
-                <label for="bellSound">Bell Sound:</label>
-                <select id="bellSound">
-                    <option value="default_bell.mp3">Default Bell</option>
-                    <!-- Add more sound options here -->
-                </select>
-                <button id="testSound">Test Sound</button>
-            </div>
-
-            <div id="dataManagement">
-                <h3>Data Management</h3>
-                <div id="importProgress" style="display: none;">
-                    <div id="importStats">
-                        <p>Processing: <span id="currentProgress">0</span> / <span id="totalRows">0</span> rows</p>
-                        <p>Users Found: <span id="usersFound">0</span></p>
-                        <p>Total Tokens: <span id="tokensProcessed">0</span></p>
-                        <p>Private Shows: <span id="privateShowsFound">0</span></p>
-                        <p>Spy Shows: <span id="spyShowsFound">0</span></p>
-                    </div>
-                    <div class="progressBar">
-                        <div id="progressBarFill"></div>
-                    </div>
+            <div id="basicSettings" class="tab-content active">
+                <!-- Move connection and threshold settings to basic -->
+                <div id="connectionSettings">
+                    <h3>Connection</h3>
+                    <button id="startScan">Scan QR Code</button>
+                    <video id="qrScanner" style="display: none; width: 300px;"></video>
+                    <canvas id="qrCanvas" style="display: none;"></canvas>
+                    <button id="cancelScan" style="display: none;">Cancel Scan</button>
+                    <br>
+                    <label for="scannedUrl">Events API URL:</label>
+                    <input type="text" id="scannedUrl" placeholder="Paste URL here">
+                    <button id="connectUrl">Connect</button>
+                    <button id="disconnectApi">Disconnect</button>
+                    <div id="apiEndpoint"></div>
+                    <div id="broadcasterNameDisplay"></div>
                 </div>
-                <label for="tokenHistoryFile">Import Token History (.csv):</label>
-                <input type="file" id="tokenHistoryFile" accept=".csv" style="display: none;">
-                <button id="importTokenHistoryButton">Import CSV</button>
-                <br>
-                <label for="importDataFile">Import Data (.json):</label>
-                <input type="file" id="importDataFile" accept=".json" style="display: none;">
-                <button id="importDataButton">Import JSON</button>
-                <br>
-                <button id="exportDataButton">Export Data (.json)</button>
-                <br>
-                <label for="enablePassword">Enable Password Protection:</label>
-                <input type="checkbox" id="enablePassword">
-                <input type="password" id="dataPassword" placeholder="Enter password" style="display: none;">
-                <br>
-                <label for="mergeData">Merge with existing data on import:</label>
-                <input type="checkbox" id="mergeData">
-                <br>
-                <button id="factoryReset">Factory Reset</button>
-                <div id="dataManagementResult"></div>
+
+                <div id="whaleThresholdsSettings">
+                    <h3>Whale Thresholds</h3>
+                    <label for="lifetimeSpendingThreshold">Lifetime Spending:</label>
+                    <input type="number" id="lifetimeSpendingThreshold" value="10000"><br>
+                    <label for="recentTipThreshold">Recent Tip Amount:</label>
+                    <input type="number" id="recentTipThreshold" value="1000"><br>
+                    <label for="recentTipTimeframe">Recent Tip Timeframe (seconds):</label>
+                    <input type="number" id="recentTipTimeframe" value="3600"><br>
+                    <label for="recentLargeTipThreshold">Recent Large Tip Amount:</label>
+                    <input type="number" id="recentLargeTipThreshold" value="5000"><br>
+                    <label for="recentPrivateThreshold">Recent Private Amount:</label>
+                    <input type="number" id="recentPrivateThreshold" value="2000"><br>
+                    <label for="recentPrivateTimeframe">Recent Private Timeframe (seconds):</label>
+                    <input type="number" id="recentPrivateTimeframe" value="86400"><br>
+                    <label for="totalPrivatesThreshold">Total Privates Amount:</label>
+                    <input type="number" id="totalPrivatesThreshold" value="10000"><br>
+                    <label for="totalLifetimeTipsThreshold">Total Lifetime Tips Amount:</label>
+                    <input type="number" id="totalLifetimeTipsThreshold" value="5000"><br>
+                    <button id="suggestThresholds">Suggest Thresholds</button>
+                </div>
+
+                <div id="soundSettings">
+                    <h3>Sound</h3>
+                    <label for="bellSound">Bell Sound:</label>
+                    <select id="bellSound">
+                        <option value="default_bell.mp3">Default Bell</option>
+                        <!-- Add more sound options here -->
+                    </select>
+                    <button id="testSound">Test Sound</button>
+                </div>
+            </div>
+
+            <div id="advancedSettings" class="tab-content">
+                <div id="dataManagement">
+                    <h3>Data Management</h3>
+                    <div id="importProgress" style="display: none;">
+                        <div id="importStats">
+                            <p>Processing: <span id="currentProgress">0</span> / <span id="totalRows">0</span> rows</p>
+                            <p>Users Found: <span id="usersFound">0</span></p>
+                            <p>Total Tokens: <span id="tokensProcessed">0</span></p>
+                            <p>Private Shows: <span id="privateShowsFound">0</span></p>
+                            <p>Spy Shows: <span id="spyShowsFound">0</span></p>
+                        </div>
+                        <div class="progressBar">
+                            <div id="progressBarFill"></div>
+                        </div>
+                    </div>
+                    <label for="tokenHistoryFile">Import Token History (.csv):</label>
+                    <input type="file" id="tokenHistoryFile" accept=".csv" style="display: none;">
+                    <button id="importTokenHistoryButton">Import CSV</button>
+                    <br>
+                    <label for="importDataFile">Import Data (.json):</label>
+                    <input type="file" id="importDataFile" accept=".json" style="display: none;">
+                    <button id="importDataButton">Import JSON</button>
+                    <br>
+                    <button id="exportDataButton">Export Data (.json)</button>
+                    <br>
+                    <label for="enablePassword">Enable Password Protection:</label>
+                    <input type="checkbox" id="enablePassword">
+                    <input type="password" id="dataPassword" placeholder="Enter password" style="display: none;">
+                    <br>
+                    <label for="mergeData">Merge with existing data on import:</label>
+                    <input type="checkbox" id="mergeData">
+                    <br>
+                    <button id="factoryReset">Factory Reset</button>
+                    <div id="dataManagementResult"></div>
+                </div>
+
+                <div id="pruningSettings">
+                    <h3>Auto-Pruning Settings</h3>
+                    <label for="enableAutoPruning">Enable Automatic Data Pruning:</label>
+                    <input type="checkbox" id="enableAutoPruning">
+                    <br>
+                    <label for="pruneThreshold">Storage Usage Threshold (%):</label>
+                    <input type="number" id="pruneThreshold" value="90" min="50" max="95">
+                    <br>
+                    <label for="pruneAmount">Amount to Prune (%):</label>
+                    <input type="number" id="pruneAmount" value="20" min="10" max="50">
+                    <p class="setting-info">When storage usage exceeds the threshold, older data will be automatically pruned.</p>
+                </div>
             </div>
 
             <button id="saveConfig">Save Configuration</button>
         </section>
+
+        
     </main>
 
     <footer>
-        <p>Chaturbate Whale Bell v1.1 | <a href="https://github.com/honytsoi/cb-whale-bell" target="_blank">Project Page</a> | <a href="https://cb-whale-bell.adult-webcam-faq.com/" target="_blank"> </a>demo </a> </a></p>
+        <p>Chaturbate Whale Bell v1.1 | <a href="https://github.com/honytsoi/cb-whale-bell" target="_blank">Project Page</a></p>
     </footer>
 
-    <!-- External Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
-
-    <!-- Application Scripts -->
     <script type="module" src="main.js"></script>
 </body>
 </html>

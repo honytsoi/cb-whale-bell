@@ -1,65 +1,94 @@
 body {
-    font-family: sans-serif;
+    font-family: 'Inter', sans-serif;
     margin: 0;
     padding: 0;
-    background-color: #f4f4f4;
+    background: linear-gradient(135deg, #330066, #FF69B4);
     color: #333;
+    min-height: 100vh;
 }
 
 header {
-    background-color: #333;
+    background-color: rgba(51, 51, 51, 0.9);
+    backdrop-filter: blur(10px);
     color: #fff;
     padding: 1rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    box-shadow: 0 2px 15px rgba(0, 0, 0, 0.1);
 }
 
 header h1 {
     margin: 0;
     font-size: 1.5rem;
+    background: linear-gradient(90deg, #FF69B4, #FFB6C1);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-weight: 800;
 }
 
 #connectionStatus {
-    font-weight: bold;
+    font-weight: 600;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+}
+
+#connectionStatus.connected {
+    background: rgba(92, 184, 92, 0.2);
+    color: #5cb85c;
 }
 
 #settingsButton {
-    background: #555;
+    background: transparent;
     color: #fff;
-    border: none;
+    border: 2px solid rgba(255, 255, 255, 0.2);
     padding: 0.5rem 1rem;
     cursor: pointer;
+    border-radius: 20px;
+    transition: all 0.3s ease;
 }
 
 #settingsButton:hover {
-    background: #777;
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.4);
 }
 
 main {
     padding: 1rem;
+    max-width: 1200px;
+    margin: 0 auto;
 }
 
 #mainArea {
-    background: #fff;
-    padding: 1rem;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 1.5rem;
     margin-bottom: 1rem;
-    border-radius: 5px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border-radius: 15px;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
 }
 
 #activityLog {
     list-style: none;
     padding: 0;
-    max-height: 200px;
+    max-height: 300px;
     overflow-y: auto;
-    border: 1px solid #ccc;
-    margin-bottom: 1rem;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 10px;
+    padding: 0.5rem;
 }
 
 #activityLog li {
-    padding: 0.5rem;
-    border-bottom: 1px solid #eee;
+    padding: 0.8rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    transition: background-color 0.3s ease;
+}
+
+#activityLog li:hover {
+    background-color: rgba(255, 255, 255, 0.95);
 }
 
 #activityLog li:last-child {
@@ -94,10 +123,11 @@ main {
 }
 
 #settingsPanel {
-    background: #fff;
-    padding: 1rem;
-    border-radius: 5px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    background: rgba(255, 255, 255, 0.95);
+    padding: 2rem;
+    border-radius: 15px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
 }
 
 #settingsPanel h2, #settingsPanel h3 {
@@ -134,18 +164,22 @@ select {
 }
 
 button {
-    background-color: #5cb85c;
+    background: linear-gradient(135deg, #FF69B4, #FFB6C1);
     color: white;
     padding: 0.7rem 1.5rem;
     border: none;
-    border-radius: 3px;
+    border-radius: 25px;
     cursor: pointer;
     margin-right: 0.5rem;
     margin-top: 0.5rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 10px rgba(255, 105, 180, 0.2);
 }
 
 button:hover {
-    background-color: #4cae4c;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(255, 105, 180, 0.3);
 }
 
 #disconnectApi, #cancelScan, #factoryReset {
@@ -233,4 +267,528 @@ footer a:hover {
     height: 100%;
     background-color: #5cb85c;
     transition: width 0.3s ease-in-out;
+}
+
+/* Setup Wizard Styles */
+#setupWizard {
+    max-width: 600px;
+    margin: 2rem auto;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 2rem;
+    border-radius: 15px;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+    text-align: center;
+}
+
+.setup-step {
+    animation: fadeIn 0.5s ease-out;
+}
+
+.setup-step h2 {
+    color: #330066;
+    margin-bottom: 1.5rem;
+    font-weight: 800;
+}
+
+.setup-step p {
+    color: #666;
+    margin-bottom: 2rem;
+    line-height: 1.6;
+}
+
+.next-step {
+    background: linear-gradient(135deg, #FF69B4, #FFB6C1);
+    font-size: 1.1rem;
+    padding: 1rem 2rem;
+}
+
+.skip-step {
+    background: transparent;
+    color: #666;
+    border: 2px solid #ccc;
+    box-shadow: none;
+}
+
+.skip-step:hover {
+    background: rgba(0, 0, 0, 0.05);
+    transform: none;
+}
+
+/* Status Bar Styles */
+.status-bar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.threshold-display, .stats-display {
+    background: rgba(255, 255, 255, 0.8);
+    padding: 1rem;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+/* Activity Section Styles */
+.activity-section {
+    background: rgba(255, 255, 255, 0.8);
+    padding: 1.5rem;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Manual URL Input Styles */
+.manual-url {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* QR Scanner Styles */
+#qrScanner {
+    width: 100%;
+    max-width: 400px;
+    margin: 1rem auto;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+/* QR Scanner Overlay Styles */
+.qr-scanner-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.scanning-line {
+    position: absolute;
+    width: 100%;
+    height: 2px;
+    background: #FF69B4;
+    animation: scan 2s linear infinite;
+}
+
+.corner-marker {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #FF69B4;
+}
+
+.top-left {
+    top: 10px;
+    left: 10px;
+    border-right: none;
+    border-bottom: none;
+}
+
+.top-right {
+    top: 10px;
+    right: 10px;
+    border-left: none;
+    border-bottom: none;
+}
+
+.bottom-left {
+    bottom: 10px;
+    left: 10px;
+    border-right: none;
+    border-top: none;
+}
+
+.bottom-right {
+    bottom: 10px;
+    right: 10px;
+    border-left: none;
+    border-top: none;
+}
+
+@keyframes scan {
+    0% { transform: translateY(0); }
+    50% { transform: translateY(100%); }
+    100% { transform: translateY(0); }
+}
+
+/* Error Animation */
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-10px); }
+    75% { transform: translateX(10px); }
+}
+
+.error-shake {
+    animation: shake 0.5s ease-in-out;
+}
+
+/* Success Highlight */
+.success-highlight {
+    animation: success-flash 2s ease-out;
+}
+
+@keyframes success-flash {
+    0% { background-color: rgba(92, 184, 92, 0.2); }
+    100% { background-color: transparent; }
+}
+
+/* Camera Permission Dialog */
+.camera-permission {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    padding: 2rem;
+    border-radius: 15px;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+    text-align: center;
+    z-index: 1000;
+}
+
+.camera-permission button {
+    margin-top: 1rem;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    header {
+        flex-direction: column;
+        text-align: center;
+        padding: 0.5rem;
+    }
+
+    header h1 {
+        margin-bottom: 0.5rem;
+    }
+
+    #settingsButton {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+    }
+
+    main {
+        padding: 0.5rem;
+    }
+
+    #mainArea, #settingsPanel {
+        padding: 1rem;
+    }
+
+    .status-bar {
+        grid-template-columns: 1fr;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    input[type="password"],
+    select {
+        width: 100%;
+        max-width: none;
+    }
+
+    label {
+        width: 100%;
+        margin-bottom: 0.25rem;
+    }
+
+    button {
+        width: 100%;
+        margin: 0.5rem 0;
+    }
+
+    #setupWizard {
+        margin: 1rem;
+        padding: 1rem;
+    }
+}
+
+/* Loading Animation */
+.loading {
+    position: relative;
+}
+
+.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 1.5em;
+    height: 1.5em;
+    margin: -0.75em;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Toast Notifications */
+.toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border-radius: 25px;
+    z-index: 1000;
+    animation: slideUp 0.3s ease-out, fadeOut 0.3s ease-out 2.7s forwards;
+}
+
+@keyframes slideUp {
+    from { transform: translate(-50%, 100%); opacity: 0; }
+    to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+@keyframes fadeOut {
+    to { opacity: 0; }
+}
+
+/* Whale Notification Animation */
+.whale-notification {
+    animation: wobble 1s ease-in-out;
+    background: linear-gradient(135deg, rgba(255, 105, 180, 0.2), rgba(255, 182, 193, 0.2));
+    border-radius: 10px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+    border-left: 4px solid #FF69B4;
+}
+
+@keyframes wobble {
+    0%, 100% { transform: translateX(0); }
+    15% { transform: translateX(-5px) rotate(-1deg); }
+    30% { transform: translateX(5px) rotate(1deg); }
+    45% { transform: translateX(-3px) rotate(-0.5deg); }
+    60% { transform: translateX(3px) rotate(0.5deg); }
+    75% { transform: translateX(-1px) rotate(-0.25deg); }
+    90% { transform: translateX(1px) rotate(0.25deg); }
+}
+
+/* Settings Panel Organization */
+.settings-tabs {
+    display: flex;
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid rgba(0, 0, 0, 0.1);
+}
+
+.tab-button {
+    background: none;
+    border: none;
+    padding: 1rem 2rem;
+    font-size: 1rem;
+    color: #666;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.tab-button:hover {
+    color: #FF69B4;
+    transform: none;
+    box-shadow: none;
+}
+
+.tab-button.active {
+    color: #FF69B4;
+    font-weight: 600;
+}
+
+.tab-button.active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: #FF69B4;
+}
+
+.tab-content {
+    display: none;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.setting-info {
+    font-size: 0.9rem;
+    color: #666;
+    margin-top: 0.5rem;
+    font-style: italic;
+}
+
+/* Monitoring Controls */
+.monitoring-controls {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(10px);
+    border-radius: 50px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.primary-button {
+    background: linear-gradient(135deg, #28a745, #20c997);
+    min-width: 180px;
+    font-size: 1.1rem;
+}
+
+.primary-button:hover {
+    background: linear-gradient(135deg, #218838, #1e7e34);
+}
+
+.secondary-button {
+    background: linear-gradient(135deg, #dc3545, #c82333);
+    min-width: 180px;
+    font-size: 1.1rem;
+}
+
+.secondary-button:hover {
+    background: linear-gradient(135deg, #c82333, #bd2130);
+}
+
+/* Mobile Optimization for New Elements */
+@media (max-width: 768px) {
+    .settings-tabs {
+        flex-direction: column;
+        margin: -1rem -1rem 1rem -1rem;
+        border-bottom: none;
+    }
+
+    .tab-button {
+        width: 100%;
+        text-align: left;
+        padding: 1rem;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    .tab-button.active::after {
+        display: none;
+    }
+
+    .tab-button.active {
+        background: rgba(255, 105, 180, 0.1);
+    }
+
+    .monitoring-controls {
+        bottom: 1rem;
+        width: calc(100% - 2rem);
+        margin: 0 1rem;
+        flex-direction: column;
+        border-radius: 15px;
+    }
+
+    .primary-button,
+    .secondary-button {
+        width: 100%;
+    }
+}
+
+/* Keyboard Shortcuts Tooltip */
+.settings-container {
+    position: relative;
+    height: 3em;
+}
+
+.keyboard-shortcuts-tooltip {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 10px);
+    background: rgba(255, 255, 255, 0.95);
+    padding: 1rem;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    min-width: 250px;
+    backdrop-filter: blur(10px);
+}
+
+.settings-container:hover .keyboard-shortcuts-tooltip {
+    display: block;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.keyboard-shortcuts-tooltip h4 {
+    margin: 0 0 0.5rem 0;
+    color: #333;
+}
+
+.keyboard-shortcuts-tooltip ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 0.5rem 0;
+}
+
+.keyboard-shortcuts-tooltip li {
+    margin: 0.5rem 0;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.keyboard-shortcuts-tooltip kbd {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.9em;
+    color: #333;
+    display: inline-block;
+    box-shadow: 0 1px 1px rgba(0,0,0,.2);
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.keyboard-shortcuts-tooltip small {
+    color: #888;
+    font-size: 0.8rem;
+    display: block;
+    margin-top: 0.5rem;
+    border-top: 1px solid rgba(0,0,0,0.1);
+    padding-top: 0.5rem;
+}
+
+/* Mobile Optimization for Keyboard Shortcuts */
+@media (max-width: 768px) {
+    .keyboard-shortcuts-tooltip {
+        position: fixed;
+        top: auto;
+        bottom: 1rem;
+        right: 1rem;
+        left: 1rem;
+        width: auto;
+    }
+    
+    .keyboard-shortcuts-tooltip li {
+        font-size: 0.9rem;
+    }
 }
