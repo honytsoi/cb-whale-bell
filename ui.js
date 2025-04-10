@@ -186,6 +186,56 @@ export function togglePasswordInput() {
     console.log(`Password input ${isChecked ? 'shown' : 'hidden'}`);
 }
 
+// Save settings to localStorage
+function saveSettingsToLocalStorage() {
+    const settings = {
+        lifetimeSpendingThreshold: lifetimeSpendingThresholdInput.value,
+        recentTipThreshold: recentTipThresholdInput.value,
+        recentTipTimeframe: recentTipTimeframeInput.value,
+        recentLargeTipThreshold: recentLargeTipThresholdInput.value,
+        recentPrivateThreshold: recentPrivateThresholdInput.value,
+        recentPrivateTimeframe: recentPrivateTimeframeInput.value,
+        totalPrivatesThreshold: totalPrivatesThresholdInput.value,
+        totalLifetimeTipsThreshold: totalLifetimeTipsThresholdInput.value,
+        settingsPanelVisible: settingsPanel.style.display === 'block',
+        enablePassword: enablePasswordCheckbox.checked,
+    };
+    localStorage.setItem('appSettings', JSON.stringify(settings));
+    console.log('Settings saved to localStorage.');
+}
+
+// Restore settings from localStorage
+function restoreSettingsFromLocalStorage() {
+    const savedSettings = JSON.parse(localStorage.getItem('appSettings'));
+    if (savedSettings) {
+        lifetimeSpendingThresholdInput.value = savedSettings.lifetimeSpendingThreshold || '';
+        recentTipThresholdInput.value = savedSettings.recentTipThreshold || '';
+        recentTipTimeframeInput.value = savedSettings.recentTipTimeframe || '';
+        recentLargeTipThresholdInput.value = savedSettings.recentLargeTipThreshold || '';
+        recentPrivateThresholdInput.value = savedSettings.recentPrivateThreshold || '';
+        recentPrivateTimeframeInput.value = savedSettings.recentPrivateTimeframe || '';
+        totalPrivatesThresholdInput.value = savedSettings.totalPrivatesThreshold || '';
+        totalLifetimeTipsThresholdInput.value = savedSettings.totalLifetimeTipsThreshold || '';
+        settingsPanel.style.display = savedSettings.settingsPanelVisible ? 'block' : 'none';
+        enablePasswordCheckbox.checked = savedSettings.enablePassword || false;
+        togglePasswordInput(); // Update password input visibility
+        console.log('Settings restored from localStorage.');
+    } else {
+        console.log('No settings found in localStorage.');
+    }
+}
+
+// Call saveSettingsToLocalStorage when settings are updated
+lifetimeSpendingThresholdInput.addEventListener('input', saveSettingsToLocalStorage);
+recentTipThresholdInput.addEventListener('input', saveSettingsToLocalStorage);
+recentTipTimeframeInput.addEventListener('input', saveSettingsToLocalStorage);
+recentLargeTipThresholdInput.addEventListener('input', saveSettingsToLocalStorage);
+recentPrivateThresholdInput.addEventListener('input', saveSettingsToLocalStorage);
+recentPrivateTimeframeInput.addEventListener('input', saveSettingsToLocalStorage);
+totalPrivatesThresholdInput.addEventListener('input', saveSettingsToLocalStorage);
+totalLifetimeTipsThresholdInput.addEventListener('input', saveSettingsToLocalStorage);
+enablePasswordCheckbox.addEventListener('change', saveSettingsToLocalStorage);
+
 // --- Import Progress UI Functions ---
 export function showImportProgress(totalRows) {
     document.getElementById('importProgress').style.display = 'block';
@@ -214,6 +264,7 @@ export function hideImportProgress() {
 
 // --- Initial UI Setup ---
 export function initializeUI() {
+    restoreSettingsFromLocalStorage();
     settingsPanel.style.display = 'none';
     passwordInput.style.display = 'none';
     document.getElementById('cancelScan').style.display = 'none';
