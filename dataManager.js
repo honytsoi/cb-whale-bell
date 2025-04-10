@@ -4,6 +4,7 @@ import * as userManager from './userManager.js';
 import * as configManager from './config.js';
 import * as ui from './ui.js';
 import { displayError, parseTimestamp } from './utils.js';
+import db from './db.js';
 // PapaParse and CryptoJS are assumed to be loaded globally via CDN
 
 const BACKUP_KEY = 'whaleBellBackup';
@@ -141,8 +142,15 @@ function processCsvData(data) {
             const username = usernames[userIndex];
             processedUserCount.add(username);
             userManager.addUser(username);
-            const existingUser = userManager.getUser(username);
+            const existingUser = userManager.getUser(username); // Get the user object AFTER addUser potentially created it
             const existingEventSignatures = new Set();
+
+            // Log the user object retrieved/created here before passing to processUserEvents
+            console.log(`dataManager.processNextUser: User object for ${username} before processing events:`, JSON.stringify(existingUser, null, 2));
+            if (!existingUser || !existingUser.id) { // Explicitly check for ID presence
+                 console.warn(`dataManager.processNextUser: User object for ${username} is missing 'id' property before calling processUserEvents!`, existingUser);
+            }
+
 
             if (existingUser?.eventHistory) {
                 existingUser.eventHistory.forEach(event => {
@@ -153,7 +161,7 @@ function processCsvData(data) {
 
             ui.displayMessage(`Processing user ${userIndex + 1}/${usernames.length}: ${username}...`, 'info', 'dataManagementResult', 0);
 
-            processUserEvents(username, userData[username], existingEventSignatures);
+            processUserEvents(username, userData[username], existingEventSignatures); // Pass the potentially newly created user object
             userIndex++;
             
             // Update stats for this user
@@ -276,6 +284,14 @@ function processCsvData(data) {
                 if (eventSignature && existingEventSignatures.has(eventSignature)) {
                     duplicatesSkippedCount++;
                 } else {
+                    // Log the event data and user state before calling userManager.addEvent
+                    console.log(`dataManager.processUserEvents: Processing event for ${username}:`, JSON.stringify(eventData, null, 2));
+                    const currentUserState = userManager.getUser(username); // Get current state right before call
+                    console.log(`dataManager.processUserEvents: User state for ${username} right before addEvent call:`, JSON.stringify(currentUserState, null, 2));
+                     if (!currentUserState || !currentUserState.id) {
+                         console.warn(`dataManager.processUserEvents: User object for ${username} is missing 'id' property right before calling addEvent!`, currentUserState);
+                     }
+
                     userManager.addEvent(username, eventType, eventData);
                     eventsAddedCount++;
                     importedTokenCount += currentEvent.amount;
@@ -561,12 +577,32 @@ function createBackup() {
         const usersArray = Array.from(usersMap.values());
         const settings = configManager.getConfig();
         const backupData = { backupTimestamp: new Date().toISOString(), version: CURRENT_APP_VERSION, users: usersArray, settings: settings };
-        localStorage.setItem(BACKUP_KEY, JSON.stringify(backupData));
+        saveBackup(backupData);
         console.log("Backup created successfully.");
         ui.displayMessage('Backup of current data created before import.', 'info', 'dataManagementResult', 5000);
     } catch (error) {
         console.error("Failed to create backup:", error);
         ui.displayMessage('Warning: Failed to create backup before import.', 'error', 'dataManagementResult');
+    }
+}
+
+export async function saveBackup(backupData) {
+    try {
+        await db.backups.put({ id: 'currentBackup', ...backupData });
+        console.log('Backup saved successfully');
+    } catch (error) {
+        console.error('Error saving backup:', error);
+        throw error;
+    }
+}
+
+export async function clearBackup() {
+    try {
+        await db.backups.delete('currentBackup');
+        console.log('Backup cleared successfully');
+    } catch (error) {
+        console.error('Error clearing backup:', error);
+        throw error;
     }
 }
 
@@ -576,13 +612,10 @@ export function factoryReset() {
         if (confirm("FINAL WARNING:\n\nReally delete everything?")) {
             try {
                 ui.displayMessage('Performing factory reset...', 'info', 'dataManagementResult', 0);
-                // Stop API connection if active - Need to import apiHandler or handle differently
-                // Example: Check if disconnect function exists globally or pass it in?
-                // if (typeof window.disconnectApiHandler === 'function') window.disconnectApiHandler();
 
                 userManager.clearAllUsers();
                 configManager.resetConfig();
-                localStorage.removeItem(BACKUP_KEY);
+                clearBackup(); // Use the IndexedDB clearBackup function instead of localStorage
 
                 ui.displayMessage('Factory reset complete. Reloading application...', 'success', 'dataManagementResult', 5000);
                 console.log("Factory reset complete.");

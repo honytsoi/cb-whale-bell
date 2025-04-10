@@ -1,10 +1,11 @@
 // Import necessary modules
-import * as configManager from './config.js';
+import db from './db.js';
 import * as userManager from './userManager.js';
+import * as configManager from './config.js';
 import * as apiHandler from './apiHandler.js';
 import * as ui from './ui.js';
 import * as dataManager from './dataManager.js';
-import * as qrScanner from './qrScanner.js';
+import { QRScanner } from './qrScanner.js';
 import { displayError } from './utils.js'; // Import specific utilities if needed
 
 // DOM Elements
@@ -26,26 +27,24 @@ const enablePasswordCheckbox = document.getElementById('enablePassword');
 
 // --- Initial Setup ---
 
-function initializeApp() {
-    console.log("Initializing Whale Bell...");
+async function initApp() {
     try {
-        // Load configuration first
-        configManager.initConfig(); // Loads config and populates UI via ui.populateSettings
+        // Open database connection
+        await db.open();
+        console.log('IndexedDB connection established');
 
-        // Load user data
-        userManager.loadUsers();
+        // Initialize modules
+        await configManager.loadConfig();
+        await userManager.loadUsers();
+        
+        // Initialize UI and other components
+        ui.initializeUI();
+        apiHandler.initializeAPI();
+        QRScanner.initialize();
 
-        // Initialize UI elements (like hiding panels, setting initial states)
-        ui.initializeUI(); // Sets initial UI states
-        ui.updateConnectionStatus(false); // Set initial disconnected status
-
-        // Add event listeners
-        addEventListeners();
-
-        console.log("Whale Bell Initialized.");
     } catch (error) {
-        displayError("Initialization failed", error);
-        ui.displayMessage("Application failed to initialize. Check console for errors.", "error", "dataManagementResult");
+        console.error('Failed to initialize application:', error);
+        ui.displayMessage('Failed to initialize application. Please refresh the page.', 'error');
     }
 }
 
@@ -88,8 +87,8 @@ function addEventListeners() {
     enablePasswordCheckbox.addEventListener('change', ui.togglePasswordInput);
 
     // --- API Connection Listeners ---
-    startScanButton.addEventListener('click', qrScanner.startScan);
-    cancelScanButton.addEventListener('click', () => qrScanner.stopScan(false)); // Explicitly pass false for cancellation
+    startScanButton.addEventListener('click', () => QRScanner.startScan());
+    cancelScanButton.addEventListener('click', () => QRScanner.stopScan(false));
     connectUrlButton.addEventListener('click', () => {
         const urlInput = document.getElementById('scannedUrl');
         apiHandler.connectWithUrl(urlInput?.value);
@@ -105,4 +104,11 @@ function addEventListeners() {
 // --- Application Start ---
 
 // Wait for the DOM to be fully loaded
-document.addEventListener('DOMContentLoaded', initializeApp);
+document.addEventListener('DOMContentLoaded', () => {
+    initApp().then(() => {
+        addEventListeners();
+    }).catch(error => {
+        console.error('Failed to initialize application:', error);
+        ui.displayMessage('Failed to initialize application. Please refresh the page.', 'error');
+    });
+});

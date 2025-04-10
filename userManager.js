@@ -2,6 +2,7 @@
 
 import { debounce, displayError, parseTimestamp } from './utils.js';
 import * as ui from './ui.js'; // Import ui for logging whale status
+import db from './db.js';
 
 const USERS_KEY = 'whaleBellUsers';
 const MAX_HISTORY_PER_USER = 1000; // As per spec
@@ -12,46 +13,17 @@ let users = new Map(); // In-memory store for user data
 
 // --- Core Methods ---
 
-export function loadUsers() {
-    console.log("Loading users...");
+export async function loadUsers() {
     try {
-        const storedUsers = localStorage.getItem(USERS_KEY);
-        if (storedUsers) {
-            const parsedUsersArray = JSON.parse(storedUsers);
-            users = new Map(parsedUsersArray);
-            console.log(`Loaded ${users.size} users from localStorage.`);
-
-            // Reset transient state and ensure structure
-            users.forEach(user => {
-                user.isOnline = false;
-                if (!user.eventHistory) user.eventHistory = [];
-                if (!user.tokenStats) {
-                     user.tokenStats = createDefaultTokenStats(user.username);
-                } else {
-                     if (!user.tokenStats.timePeriods) {
-                         user.tokenStats.timePeriods = createDefaultTokenStats(user.username).timePeriods;
-                     }
-                     const defaultPeriods = createDefaultTokenStats(user.username).timePeriods;
-                     for (const periodKey in defaultPeriods) {
-                         if (!user.tokenStats.timePeriods[periodKey]) {
-                             user.tokenStats.timePeriods[periodKey] = defaultPeriods[periodKey];
-                         }
-                     }
-                     // Ensure lifetime totals exist
-                     if (user.tokenStats.totalTips === undefined) user.tokenStats.totalTips = 0;
-                     if (user.tokenStats.totalPrivates === undefined) user.tokenStats.totalPrivates = 0;
-                     if (user.tokenStats.totalMedia === undefined) user.tokenStats.totalMedia = 0;
-                }
-                 if (!user.maxHistory) user.maxHistory = MAX_HISTORY_PER_USER;
-            });
-        } else {
-            console.log("No user data found in localStorage.");
-            users = new Map();
-        }
+        const usersArray = await db.users.toArray();
+        users.clear();
+        usersArray.forEach(user => {
+            users.set(user.id, user);
+        });
+        console.log(`Loaded ${users.size} users from IndexedDB`);
     } catch (error) {
-        displayError("Failed to load user data from localStorage", error);
-        console.warn("Initializing with empty user data due to loading error.");
-        users = new Map();
+        console.error('Error loading users:', error);
+        throw error;
     }
 }
 
@@ -68,43 +40,75 @@ function createDefaultTokenStats(username) {
     };
 }
 
-
-function saveUsersInternal() {
-    let attempts = 0;
-    while (attempts < MAX_PRUNE_ATTEMPTS) {
-        try {
-            const usersArray = Array.from(users.entries());
-            const jsonString = JSON.stringify(usersArray);
-            localStorage.setItem(USERS_KEY, jsonString);
-            if (attempts > 0) {
-                 console.log(`Users saved successfully after ${attempts} pruning attempt(s).`);
+export async function saveUsers() {
+    try {
+        const usersArray = Array.from(users.values());
+        
+        // Validate and ensure all users have an id field
+        const validUsers = usersArray.map(user => {
+            if (!user.id) {
+                user.id = user.username; // Use username as id if missing
             }
-            return; // Success
-        } catch (error) {
-            if (error.name === 'QuotaExceededError' || (error.message && error.message.toLowerCase().includes('quota'))) {
-                attempts++;
-                console.warn(`LocalStorage quota exceeded (Attempt ${attempts}/${MAX_PRUNE_ATTEMPTS}). Attempting to prune old user data...`);
-                const prunedCount = handleQuotaExceededError();
-                if (prunedCount === 0) {
-                     displayError("Failed to save user data: Quota exceeded, and no further pruning possible.", error);
-                     alert("Failed to save user data: Storage limit reached, and no more old data could be removed. Please export your data if possible.");
-                     return;
-                }
-                 // Loop continues to retry save
-            } else {
-                displayError("Failed to save user data to localStorage", error);
-                alert("An unexpected error occurred while saving user data. Check the console.");
-                return; // Exit on other errors
-            }
-        }
+            return user;
+        });
+        
+        await db.users.bulkPut(validUsers);
+        console.log(`Saved ${validUsers.length} users to IndexedDB`);
+    } catch (error) {
+        console.error('Error saving users:', error);
+        throw error;
     }
-    // If loop finishes without success
-    displayError(`Failed to save user data after ${MAX_PRUNE_ATTEMPTS} pruning attempts.`, null);
-    alert(`Failed to save user data: Storage limit still reached after ${MAX_PRUNE_ATTEMPTS} attempts to clear space. Please export your data.`);
+}
+
+export async function addEvent(username, type, data) {
+    const isNewUser = addUser(username);
+    const user = getUser(username);
+    const eventData = data || {};
+    const timestamp = parseTimestamp(eventData.timestamp) || new Date().toISOString();
+
+    // Create event object
+    const event = {
+        userId: username,
+        type: type,
+        timestamp: timestamp,
+        data: { ...eventData }
+    };
+
+    try {
+        // Store in IndexedDB
+        console.log(`userManager.addEvent: Preparing to save event for user ${username}:`, JSON.stringify(event, null, 2));
+        await db.events.add(event);
+        console.log(`userManager.addEvent: Event added to DB for user ${username}.`);
+        // Update in-memory user data
+        if (!user.firstSeenDate || timestamp < user.firstSeenDate) user.firstSeenDate = timestamp;
+        if (!user.lastSeenDate || timestamp > user.lastSeenDate) user.lastSeenDate = timestamp;
+
+        // Update event history
+        user.eventHistory.unshift(event);
+        if (user.eventHistory.length > user.maxHistory) user.eventHistory.pop();
+
+        // Update stats if event has amount
+        if (eventData && typeof eventData.amount === 'number' && eventData.amount > 0) {
+            updateTokenStats(user, event);
+        }
+
+        // Handle online/offline status
+        if (type === 'userEnter') markUserOnline(username, false);
+        else if (type === 'userLeave') markUserOffline(username, false);
+
+        // Save changes
+        // console.log(`userManager.addEvent: Preparing to save user map state after event processing for ${username}. Current user state:`, JSON.stringify(getUser(username), null, 2));
+        await saveUsers();
+        
+        return isNewUser;
+    } catch (error) {
+        console.error('Error adding event:', error, "User:", JSON.stringify(getUser(username), null, 2), "Event:", JSON.stringify(event, null, 2));
+        throw error;
+    }
 }
 
 // Debounced save function
-export const saveUsers = debounce(saveUsersInternal, 5000); // Increased from 1500ms to 5000ms
+export const saveUsersDebounced = debounce(saveUsers, 5000); // Increased from 1500ms to 5000ms
 
 // Returns the number of users pruned
 function handleQuotaExceededError() {
@@ -131,13 +135,14 @@ export function addUser(username) {
     if (!users.has(username)) {
         isNew = true;
         users.set(username, {
+            id: username, // Add id field matching username
             username: username,
             firstSeenDate: null, lastSeenDate: null, isOnline: false,
             eventHistory: [],
             tokenStats: createDefaultTokenStats(username),
             maxHistory: MAX_HISTORY_PER_USER
         });
-        saveUsers();
+        saveUsersDebounced();
     }
     return isNew;
 }
@@ -148,31 +153,6 @@ export function getUser(username) {
 
 export function getAllUsers() {
     return new Map(users); // Return a copy
-}
-
-export function addEvent(username, type, data) {
-    const isNewUser = addUser(username);
-    const user = getUser(username);
-    const eventData = data || {};
-    const timestamp = parseTimestamp(eventData.timestamp) || new Date().toISOString();
-
-    if (!user.firstSeenDate || timestamp < user.firstSeenDate) user.firstSeenDate = timestamp;
-    if (!user.lastSeenDate || timestamp > user.lastSeenDate) user.lastSeenDate = timestamp;
-
-    const event = { username: username, type: type, timestamp: timestamp, data: { ...eventData } };
-
-    user.eventHistory.unshift(event);
-    if (user.eventHistory.length > user.maxHistory) user.eventHistory.pop();
-
-    if (eventData && typeof eventData.amount === 'number' && eventData.amount > 0) {
-        updateTokenStats(user, event);
-    }
-
-    if (type === 'userEnter') markUserOnline(username, false);
-    else if (type === 'userLeave') markUserOffline(username, false);
-
-    saveUsers();
-    return isNewUser;
 }
 
 // --- Token Stats Calculation with Detailed Logging ---
@@ -221,7 +201,7 @@ export function recalculateAllUserStats() {
     console.log("Recalculating stats for all users...");
     let count = 0;
     users.forEach(user => { recalculateTotals(user, false); count++; });
-    saveUsers();
+    saveUsersDebounced();
     console.log(`Recalculation complete for ${count} users.`);
 }
 
@@ -283,7 +263,7 @@ export function recalculateTotals(user, shouldSave = true) {
     }
 
     stats.lastUpdated = new Date().toISOString();
-    if (shouldSave) saveUsers();
+    if (shouldSave) saveUsersDebounced();
 }
 
 // --- Online/Offline Status ---
@@ -292,7 +272,7 @@ export function markUserOnline(username, shouldSave = true) {
     const user = getUser(username);
     if (user && !user.isOnline) {
         user.isOnline = true; user.lastSeenDate = new Date().toISOString();
-        if (shouldSave) saveUsers();
+        if (shouldSave) saveUsersDebounced();
     }
 }
 
@@ -300,7 +280,7 @@ export function markUserOffline(username, shouldSave = true) {
     const user = getUser(username);
     if (user && user.isOnline) {
         user.isOnline = false; user.lastSeenDate = new Date().toISOString();
-        if (shouldSave) saveUsers();
+        if (shouldSave) saveUsersDebounced();
     }
 }
 
@@ -395,13 +375,14 @@ export function isWhale(username, thresholds) {
 export function clearAllUsers() {
     console.log("Clearing all user data...");
     users.clear();
-    saveUsersInternal(); // Persist immediately
+    saveUsers(); // Persist immediately
 }
 
 export function importUser(userObject) {
      if (!userObject || !userObject.username) { console.warn("Skipping invalid user object during import:", userObject); return; }
      const username = userObject.username;
      const defaultStats = createDefaultTokenStats(username);
+     userObject.id = username; // Ensure id field exists
      userObject.tokenStats = { ...defaultStats, ...(userObject.tokenStats || {}) };
      userObject.tokenStats.timePeriods = { ...defaultStats.timePeriods, ...(userObject.tokenStats.timePeriods || {}) };
      if (!userObject.eventHistory) userObject.eventHistory = [];

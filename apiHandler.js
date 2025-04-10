@@ -173,6 +173,18 @@ function processEvent(event) {
     }
 }
 
+export function initializeAPI() {
+    console.log("Initializing API handler...");
+    const config = configManager.getConfig();
+    if (config.scannedUrl && config.broadcasterName) {
+        console.log(`Found existing API configuration for ${config.broadcasterName}`);
+        // Don't auto-connect, but populate the URL field
+        const urlInput = document.getElementById('scannedUrl');
+        if (urlInput) {
+            urlInput.value = config.scannedUrl;
+        }
+    }
+}
 
 export function disconnect() {
     console.log("Disconnecting from API...");

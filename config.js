@@ -3,6 +3,7 @@
 import * as ui from './ui.js'; // Import UI to populate settings
 import * as userManager from './userManager.js'; // Import userManager to analyze data
 import { displayError } from './utils.js';
+import db from './db.js';
 
 // Default configuration
 const defaultConfig = {
@@ -22,21 +23,20 @@ const defaultConfig = {
 let currentConfig = { ...defaultConfig };
 const CONFIG_KEY = 'whaleBellConfig';
 
-export function loadConfig() {
+export async function loadConfig() {
     console.log("Loading configuration...");
     try {
-        const storedConfig = localStorage.getItem(CONFIG_KEY);
-        if (storedConfig) {
-            const parsedConfig = JSON.parse(storedConfig);
-            currentConfig = { ...defaultConfig, ...parsedConfig };
-            console.log("Configuration loaded from localStorage:", currentConfig);
-        } else {
-            console.log("No configuration found in localStorage, using defaults.");
+        const config = await db.config.get('main');
+        if (!config) {
+            console.log('No saved configuration found, using defaults');
             currentConfig = { ...defaultConfig };
+        } else {
+            currentConfig = { ...defaultConfig, ...config };
+            console.log("Configuration loaded from IndexedDB:", currentConfig);
         }
         ui.populateSettings(); // Update UI fields after loading/setting defaults
     } catch (error) {
-        displayError("Failed to load configuration from localStorage", error);
+        displayError("Failed to load configuration from IndexedDB", error);
         console.warn("Using default configuration due to loading error.");
         currentConfig = { ...defaultConfig };
         try {
@@ -47,7 +47,7 @@ export function loadConfig() {
     }
 }
 
-export function saveConfig() {
+export async function saveConfig() {
     console.log("Saving configuration...");
     try {
         // Read values from UI input fields and update currentConfig
@@ -61,7 +61,7 @@ export function saveConfig() {
         currentConfig.totalLifetimeTipsThreshold = parseInt(document.getElementById('totalLifetimeTipsThreshold').value, 10) || defaultConfig.totalLifetimeTipsThreshold;
         currentConfig.bellSound = document.getElementById('bellSound').value || defaultConfig.bellSound;
 
-        localStorage.setItem(CONFIG_KEY, JSON.stringify(currentConfig));
+        await db.config.put({ id: 'main', ...currentConfig });
         console.log("Configuration saved:", currentConfig);
         // Update the read-only display after saving
         ui.populateSettings();
@@ -81,16 +81,15 @@ export function updateConfig(newValues) {
     // Don't auto-save here, let user explicitly save or connect trigger save
 }
 
-
-export function resetConfig() {
+export async function resetConfig() {
     console.log("Resetting configuration to defaults...");
     currentConfig = { ...defaultConfig };
     try {
-        localStorage.removeItem(CONFIG_KEY);
-        console.log("Configuration removed from localStorage.");
+        await db.config.delete('main');
+        console.log("Configuration removed from IndexedDB.");
         ui.populateSettings(); // Update UI to reflect defaults
     } catch (error) {
-        displayError("Failed to remove configuration from localStorage during reset", error);
+        displayError("Failed to remove configuration from IndexedDB during reset", error);
     }
 }
 

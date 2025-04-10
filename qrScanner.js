@@ -1,174 +1,173 @@
 // qrScanner.js - Handles QR code scanning logic
 
-import * as apiHandler from './apiHandler.js'; // To initiate connection
-import * as ui from './ui.js'; // To display messages and update UI state
+import * as apiHandler from './apiHandler.js';
+import * as ui from './ui.js';
 
-// DOM Elements
-const videoElement = document.getElementById('qrScanner');
-const canvasElement = document.getElementById('qrCanvas');
-const startScanButton = document.getElementById('startScan');
-const cancelScanButton = document.getElementById('cancelScan');
-const urlInput = document.getElementById('scannedUrl'); // To potentially populate the URL field
+// Create a QRScanner object to export
+export const QRScanner = {
+    stream: null,
+    animationFrameId: null,
+    canvasContext: null,
+    videoElement: null,
+    canvasElement: null,
+    startScanButton: null,
+    cancelScanButton: null,
+    urlInput: null,
 
-// Ensure canvas context is retrieved correctly
-let canvasContext = null;
-if (canvasElement) {
-    canvasContext = canvasElement.getContext('2d', { willReadFrequently: true }); // Optimization hint
-} else {
-    console.error("QR Canvas element not found!");
-}
+    initialize() {
+        // Initialize DOM elements
+        this.videoElement = document.getElementById('qrScanner');
+        this.canvasElement = document.getElementById('qrCanvas');
+        this.startScanButton = document.getElementById('startScan');
+        this.cancelScanButton = document.getElementById('cancelScan');
+        this.urlInput = document.getElementById('scannedUrl');
 
-
-let stream = null;
-let animationFrameId = null;
-
-export function startScan() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        ui.displayMessage('Camera access (getUserMedia) not supported by this browser.', 'error', 'apiEndpoint');
-        return;
-    }
-     if (!canvasContext) {
-        ui.displayMessage('Canvas context not available for QR scanning.', 'error', 'apiEndpoint');
-        return;
-    }
-     if (!window.jsQR) {
-         ui.displayMessage('jsQR library not loaded. Cannot scan.', 'error', 'apiEndpoint');
-         return;
-     }
-
-
-    console.log("Starting QR code scan...");
-    ui.displayMessage('Requesting camera access...', 'info', 'apiEndpoint');
-    startScanButton.disabled = true;
-    cancelScanButton.style.display = 'inline-block';
-    videoElement.style.display = 'block';
-
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-        .then(handleStream)
-        .catch(handleError);
-}
-
-function handleStream(mediaStream) {
-    stream = mediaStream;
-    videoElement.srcObject = stream;
-    videoElement.setAttribute("playsinline", true); // Required to work on iOS Safari
-    videoElement.play()
-        .then(() => {
-            console.log("Camera stream active and playing.");
-            ui.displayMessage('Camera active. Point at QR code.', 'info', 'apiEndpoint');
-            requestAnimationFrame(scanLoop);
-        })
-        .catch(error => {
-             console.error("Error playing video stream:", error);
-             ui.displayMessage(`Error starting camera stream: ${error.message}`, 'error', 'apiEndpoint');
-             stopScan(false);
-        });
-}
-
-function handleError(error) {
-    console.error("Error accessing camera:", error);
-    let message = `Camera Error: ${error.name}`;
-    if (error.message) message += ` - ${error.message}`;
-    ui.displayMessage(message, 'error', 'apiEndpoint');
-    stopScan(false); // Stop scan without success message
-}
-
-function scanLoop() {
-    if (!stream || !videoElement || videoElement.readyState !== videoElement.HAVE_ENOUGH_DATA || !canvasContext) {
-        // If stream stopped or elements missing, cancel the loop
-        if (animationFrameId) { // Check if loop is still supposed to be running
-             console.warn("Scan loop cancelled due to missing stream or elements.");
-             stopScan(false);
-        }
-        return;
-    }
-
-    try {
-        // Set canvas size to match video element size
-        if (canvasElement.height !== videoElement.videoHeight || canvasElement.width !== videoElement.videoWidth) {
-            canvasElement.height = videoElement.videoHeight;
-            canvasElement.width = videoElement.videoWidth;
-             if(canvasElement.height === 0 || canvasElement.width === 0) {
-                 console.warn("Video dimensions are zero, skipping frame.");
-                 animationFrameId = requestAnimationFrame(scanLoop); // Try again next frame
-                 return;
-             }
-        }
-
-
-        // Draw video frame to canvas
-        canvasContext.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-
-        // Get image data from canvas
-        const imageData = canvasContext.getImageData(0, 0, canvasElement.width, canvasElement.height);
-
-        // Use jsQR to detect QR code
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: "dontInvert", // Performance optimization
-        });
-
-        if (code && code.data) {
-            console.log("QR Code detected:", code.data);
-            handleCodeFound(code.data);
-            // Exit loop once code is found and handled
+        // Initialize canvas context
+        if (this.canvasElement) {
+            this.canvasContext = this.canvasElement.getContext('2d', { willReadFrequently: true });
         } else {
-            // Continue loop if no code found
-            animationFrameId = requestAnimationFrame(scanLoop);
+            console.error("QR Canvas element not found!");
         }
-    } catch (error) {
-        console.error("Error during QR scan loop:", error);
-        ui.displayMessage('Error during scanning. See console.', 'error', 'apiEndpoint');
-        stopScan(false); // Stop on error
-    }
-}
+    },
 
-function handleCodeFound(url) {
-    // Validate the URL format
-    if (url && url.startsWith('https://eventsapi.chaturbate.com/events/')) {
-        console.log("Valid Events API URL found:", url);
-        ui.displayMessage('Valid QR code found! Connecting...', 'success', 'apiEndpoint');
-        stopScan(true); // Stop scanning visuals successfully
-
-        // Update the input field
-        if (urlInput) {
-            urlInput.value = url;
-            urlInput.disabled = true; // Disable input after successful scan/connect
+    startScan() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            ui.displayMessage('Camera access (getUserMedia) not supported by this browser.', 'error', 'apiEndpoint');
+            return;
+        }
+        if (!QRScanner.canvasContext) {
+            ui.displayMessage('Canvas context not available for QR scanning.', 'error', 'apiEndpoint');
+            return;
+        }
+        if (!window.jsQR) {
+            ui.displayMessage('jsQR library not loaded. Cannot scan.', 'error', 'apiEndpoint');
+            return;
         }
 
-        // Initiate connection using the scanned URL via apiHandler
-        apiHandler.connectWithUrl(url);
+        console.log("Starting QR code scan...");
+        ui.displayMessage('Requesting camera access...', 'info', 'apiEndpoint');
+        QRScanner.startScanButton.disabled = true;
+        QRScanner.cancelScanButton.style.display = 'inline-block';
+        QRScanner.videoElement.style.display = 'block';
 
-    } else {
-        console.warn("Invalid QR code data:", url);
-        ui.displayMessage('Scanned code is not a valid Events API URL. Try again.', 'error', 'apiEndpoint');
-        // Keep scanning - request another frame
-        animationFrameId = requestAnimationFrame(scanLoop);
-    }
-}
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then(QRScanner.handleStream)
+            .catch(QRScanner.handleError);
+    },
 
-export function stopScan(success = false) {
-    console.log("Stopping QR code scan...");
-    if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-    }
-    if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        stream = null;
-    }
-    if (videoElement) {
-        videoElement.srcObject = null;
-        videoElement.style.display = 'none';
-    }
-     if (canvasContext) {
-        canvasContext.clearRect(0, 0, canvasElement.width, canvasElement.height); // Clear canvas
-     }
+    handleStream(mediaStream) {
+        QRScanner.stream = mediaStream;
+        QRScanner.videoElement.srcObject = mediaStream;
+        QRScanner.videoElement.setAttribute("playsinline", true);
+        QRScanner.videoElement.play()
+            .then(() => {
+                console.log("Camera stream active and playing.");
+                ui.displayMessage('Camera active. Point at QR code.', 'info', 'apiEndpoint');
+                requestAnimationFrame(QRScanner.scanLoop);
+            })
+            .catch(error => {
+                console.error("Error playing video stream:", error);
+                ui.displayMessage(`Error starting camera stream: ${error.message}`, 'error', 'apiEndpoint');
+                QRScanner.stopScan(false);
+            });
+    },
 
+    handleError(error) {
+        console.error("Error accessing camera:", error);
+        let message = `Camera Error: ${error.name}`;
+        if (error.message) message += ` - ${error.message}`;
+        ui.displayMessage(message, 'error', 'apiEndpoint');
+        QRScanner.stopScan(false);
+    },
 
-    startScanButton.disabled = apiHandler.isApiConnected(); // Disable if already connected
-    cancelScanButton.style.display = 'none';
+    scanLoop() {
+        if (!QRScanner.stream || !QRScanner.videoElement || 
+            QRScanner.videoElement.readyState !== QRScanner.videoElement.HAVE_ENOUGH_DATA || 
+            !QRScanner.canvasContext) {
+            if (QRScanner.animationFrameId) {
+                console.warn("Scan loop cancelled due to missing stream or elements.");
+                QRScanner.stopScan(false);
+            }
+            return;
+        }
 
-    if (!success && !apiHandler.isApiConnected()) { // Only show cancelled message if not already connected
-        ui.displayMessage('Scan cancelled.', 'info', 'apiEndpoint');
+        try {
+            if (QRScanner.canvasElement.height !== QRScanner.videoElement.videoHeight || 
+                QRScanner.canvasElement.width !== QRScanner.videoElement.videoWidth) {
+                QRScanner.canvasElement.height = QRScanner.videoElement.videoHeight;
+                QRScanner.canvasElement.width = QRScanner.videoElement.videoWidth;
+                if(QRScanner.canvasElement.height === 0 || QRScanner.canvasElement.width === 0) {
+                    console.warn("Video dimensions are zero, skipping frame.");
+                    QRScanner.animationFrameId = requestAnimationFrame(QRScanner.scanLoop);
+                    return;
+                }
+            }
+
+            QRScanner.canvasContext.drawImage(QRScanner.videoElement, 0, 0, 
+                QRScanner.canvasElement.width, QRScanner.canvasElement.height);
+
+            const imageData = QRScanner.canvasContext.getImageData(0, 0, 
+                QRScanner.canvasElement.width, QRScanner.canvasElement.height);
+
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: "dontInvert"
+            });
+
+            if (code && code.data) {
+                console.log("QR Code detected:", code.data);
+                QRScanner.handleCodeFound(code.data);
+            } else {
+                QRScanner.animationFrameId = requestAnimationFrame(QRScanner.scanLoop);
+            }
+        } catch (error) {
+            console.error("Error during QR scan loop:", error);
+            ui.displayMessage('Error during scanning. See console.', 'error', 'apiEndpoint');
+            QRScanner.stopScan(false);
+        }
+    },
+
+    handleCodeFound(url) {
+        if (url && url.startsWith('https://eventsapi.chaturbate.com/events/')) {
+            console.log("Valid Events API URL found:", url);
+            ui.displayMessage('Valid QR code found! Connecting...', 'success', 'apiEndpoint');
+            QRScanner.stopScan(true);
+
+            if (QRScanner.urlInput) {
+                QRScanner.urlInput.value = url;
+                QRScanner.urlInput.disabled = true;
+            }
+
+            apiHandler.connectWithUrl(url);
+        } else {
+            console.warn("Invalid QR code data:", url);
+            ui.displayMessage('Scanned code is not a valid Events API URL. Try again.', 'error', 'apiEndpoint');
+            QRScanner.animationFrameId = requestAnimationFrame(QRScanner.scanLoop);
+        }
+    },
+
+    stopScan(success = false) {
+        console.log("Stopping QR code scan...");
+        if (QRScanner.animationFrameId) {
+            cancelAnimationFrame(QRScanner.animationFrameId);
+            QRScanner.animationFrameId = null;
+        }
+        if (QRScanner.stream) {
+            QRScanner.stream.getTracks().forEach(track => track.stop());
+            QRScanner.stream = null;
+        }
+        if (QRScanner.videoElement) {
+            QRScanner.videoElement.srcObject = null;
+            QRScanner.videoElement.style.display = 'none';
+        }
+        if (QRScanner.canvasContext) {
+            QRScanner.canvasContext.clearRect(0, 0, QRScanner.canvasElement.width, QRScanner.canvasElement.height);
+        }
+
+        QRScanner.startScanButton.disabled = apiHandler.isApiConnected();
+        QRScanner.cancelScanButton.style.display = 'none';
+
+        if (!success && !apiHandler.isApiConnected()) {
+            ui.displayMessage('Scan cancelled.', 'info', 'apiEndpoint');
+        }
     }
-}
+};
