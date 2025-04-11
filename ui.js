@@ -14,11 +14,16 @@ try {
 }
 
 // --- DOM Element References ---
-const connectionStatusElement = document.getElementById('connectionStatus');
+// --- DOM Element References ---
+// Header Elements
+const connectionSwitchCheckbox = document.getElementById('connectionSwitch');
+const connectionToggleStatusText = document.getElementById('connectionToggleStatusText');
+// Other elements
+// const connectionStatusElement = document.getElementById('connectionStatus'); // Removed old status element
 const settingsPanel = document.getElementById('settingsPanel');
 const activityLogElement = document.getElementById('activityLog');
 const dataManagementResultElement = document.getElementById('dataManagementResult');
-const apiEndpointElement = document.getElementById('apiEndpoint');
+const apiEndpointResultElement = document.getElementById('apiEndpointResult'); // Renamed in HTML
 const broadcasterNameDisplayElement = document.getElementById('broadcasterNameDisplay');
 const passwordInput = document.getElementById('dataPassword');
 const enablePasswordCheckbox = document.getElementById('enablePassword');
@@ -73,31 +78,55 @@ function playNotificationSound() {
 
 // --- UI Update Functions ---
 
-export function updateConnectionStatus(status, url = null, broadcaster = null) {
-    console.log(`Updating connection status UI: ${status}`);
+// Consolidated function to update ALL connection-related UI elements
+export function updateConnectionUI(status, apiUrl = null, broadcaster = null, config = null) {
+    const currentConfig = config || configManager.getConfig(); // Get config if not passed
+    const savedUrl = apiUrl || currentConfig.scannedUrl;
+
+    console.log(`Updating Connection UI (Toggle): Status=${status}, SavedURL=${!!savedUrl}, Broadcaster=${broadcaster}`);
+
+    let toggleChecked = false;
+    let toggleDisabled = false;
+    let statusText = 'Disconnected';
+    let statusColor = 'salmon'; // Or header color
+
     if (status === 'connecting') {
-        connectionStatusElement.textContent = 'Status: Connecting...';
-        connectionStatusElement.style.color = 'orange';
-        apiEndpointElement.textContent = '';
-        broadcasterNameDisplayElement.textContent = '';
+        toggleChecked = true; // Visually show 'on' but disable interaction
+        toggleDisabled = true;
+        statusText = 'Connecting...';
+        statusColor = 'orange';
     } else if (status === true) { // Connected
-        connectionStatusElement.textContent = 'Status: Connected';
-        connectionStatusElement.style.color = 'lightgreen';
-        apiEndpointElement.textContent = `Connected to: ${url || 'Unknown URL'}`;
-        broadcasterNameDisplayElement.textContent = `Broadcaster: ${broadcaster || 'Unknown'}`;
-        document.getElementById('startScan').disabled = true;
-        document.getElementById('connectUrl').disabled = true;
-        document.getElementById('scannedUrl').disabled = true;
-        document.getElementById('disconnectApi').disabled = false;
-    } else { // Disconnected or Error
-        connectionStatusElement.textContent = 'Status: Disconnected';
-        connectionStatusElement.style.color = 'salmon';
-         apiEndpointElement.textContent = '';
-         broadcasterNameDisplayElement.textContent = '';
-         document.getElementById('startScan').disabled = false;
-         document.getElementById('connectUrl').disabled = false;
-         document.getElementById('scannedUrl').disabled = false;
-         document.getElementById('disconnectApi').disabled = true;
+        toggleChecked = true;
+        toggleDisabled = false; // Enable to allow disconnect
+        statusText = `Connected: ${broadcaster || 'Unknown'}`;
+        statusColor = 'lightgreen';
+    } else { // Disconnected or Error (status is false or other)
+        toggleChecked = false;
+        toggleDisabled = !savedUrl; // Disable toggle if no URL is configured
+        statusText = 'Disconnected';
+        statusColor = 'salmon'; // Or header default color
+        if (!savedUrl) {
+            statusText = 'Setup Required'; // More specific if no URL
+        }
+    }
+
+    // Update Toggle Switch State
+    if (connectionSwitchCheckbox) {
+        connectionSwitchCheckbox.checked = toggleChecked;
+        connectionSwitchCheckbox.disabled = toggleDisabled;
+    }
+    if (connectionToggleStatusText) {
+        connectionToggleStatusText.textContent = statusText;
+        connectionToggleStatusText.style.color = statusColor; // Apply color to text
+    }
+
+    // Update Settings Panel Displays (if needed)
+    // Keep existing logic for apiEndpointResultElement, broadcasterNameDisplayElement if desired
+    if (apiEndpointResultElement) {
+        apiEndpointResultElement.textContent = status === true ? `Connected to: ${savedUrl || 'Unknown URL'}` : '';
+    }
+     if (broadcasterNameDisplayElement) {
+        broadcasterNameDisplayElement.textContent = status === true ? `Broadcaster: ${broadcaster || 'Unknown'}` : '';
     }
 }
 
@@ -140,6 +169,12 @@ export function populateSettings() {
         totalPrivatesThresholdInput.value = config.totalPrivatesThreshold ?? '';
         totalLifetimeTipsThresholdInput.value = config.totalLifetimeTipsThreshold ?? '';
         // bellSoundSelect.value = config.bellSound || 'default_bell.mp3'; // Removed select
+
+        // Also populate the scannedUrl input field in settings
+        const scannedUrlInput = document.getElementById('scannedUrl');
+        if (scannedUrlInput) {
+            scannedUrlInput.value = config.scannedUrl || '';
+        }
 
         if (currentThresholdsDisplay) {
              currentThresholdsDisplay.innerHTML = `
@@ -269,7 +304,9 @@ export function initializeUI() {
     passwordInput.style.display = 'none';
     document.getElementById('cancelScan').style.display = 'none';
     document.getElementById('qrScanner').style.display = 'none';
-    updateConnectionStatus(false);
+    // Set initial connection UI state based on loaded config
+    const initialConfig = configManager.getConfig();
+    updateConnectionUI(false, initialConfig.scannedUrl, null, initialConfig); // Start as disconnected
     addLogEntry("Application initialized.", "info");
 
     // Remove or hide the sound file selector if it exists

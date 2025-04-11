@@ -17,8 +17,9 @@ const importDataButton = document.getElementById('importDataButton');
 const importDataFile = document.getElementById('importDataFile');
 const startScanButton = document.getElementById('startScan');
 const cancelScanButton = document.getElementById('cancelScan');
-const connectUrlButton = document.getElementById('connectUrl');
-const disconnectApiButton = document.getElementById('disconnectApi');
+// const connectUrlButton = document.getElementById('connectUrl'); // Replaced by toggle
+// const disconnectApiButton = document.getElementById('disconnectApi'); // Replaced by toggle
+const connectionSwitch = document.getElementById('connectionSwitch'); // Get the toggle checkbox
 const exportDataButton = document.getElementById('exportDataButton');
 const factoryResetButton = document.getElementById('factoryReset');
 const suggestThresholdsButton = document.getElementById('suggestThresholds');
@@ -57,6 +58,11 @@ function addEventListeners() {
         try {
             configManager.saveConfig();
             ui.displayMessage('Configuration saved.', 'success', 'dataManagementResult');
+            // Update the connection toggle UI based on the newly saved config
+            const currentConfig = configManager.getConfig();
+            // Assume disconnected status unless actively connected (which save doesn't change)
+            const currentStatus = apiHandler.isApiConnected();
+            ui.updateConnectionUI(currentStatus, currentConfig.scannedUrl, currentConfig.broadcasterName, currentConfig);
         } catch (error) {
             displayError("Failed to save config", error);
             ui.displayMessage(`Error saving config: ${error.message}`, 'error', 'dataManagementResult');
@@ -86,14 +92,59 @@ function addEventListeners() {
     factoryResetButton.addEventListener('click', dataManager.factoryReset);
     enablePasswordCheckbox.addEventListener('change', ui.togglePasswordInput);
 
-    // --- API Connection Listeners ---
+    // --- Connection Toggle Listener ---
+    if (connectionSwitch) {
+        connectionSwitch.addEventListener('change', () => {
+            const isChecked = connectionSwitch.checked;
+            const config = configManager.getConfig();
+
+            if (isChecked) {
+                // --- Attempting to Connect ---
+                console.log("Connection toggle switched ON");
+                if (config.scannedUrl) {
+                    // URL exists, proceed with connection attempt
+                    ui.updateConnectionUI('connecting', config.scannedUrl, null, config); // Show connecting state immediately
+                    apiHandler.connectWithUrl(config.scannedUrl);
+                } else {
+                    // No URL configured - Guide user to settings
+                    console.log("Connect attempt failed: No API URL configured.");
+                    // Prevent toggle from staying checked
+                    connectionSwitch.checked = false;
+                    // Update UI to reflect disconnected state and reason
+                    ui.updateConnectionUI(false, null, null, config);
+                    // Provide feedback
+                    ui.displayMessage("Please configure API Endpoint in Settings first.", "error", "connectionToggleStatusText", 4000); // Display near toggle
+
+                    // Open settings panel and focus the input
+                    const settingsPanel = document.getElementById('settingsPanel');
+                    if (settingsPanel.style.display === 'none') {
+                        ui.toggleSettingsPanel();
+                    }
+                    // Use setTimeout to ensure panel is visible before focusing
+                    setTimeout(() => {
+                        const urlInput = document.getElementById('scannedUrl');
+                        if (urlInput) {
+                            urlInput.focus();
+                            urlInput.select(); // Select existing text if any
+                        }
+                    }, 100); // Small delay
+                }
+            } else {
+                // --- Attempting to Disconnect ---
+                console.log("Connection toggle switched OFF");
+                apiHandler.disconnect();
+            }
+        });
+    } else {
+        console.error("Connection switch element not found!");
+    }
+
+    // --- Settings Panel API Config Listeners ---
     startScanButton.addEventListener('click', () => QRScanner.startScan());
     cancelScanButton.addEventListener('click', () => QRScanner.stopScan(false));
-    connectUrlButton.addEventListener('click', () => {
-        const urlInput = document.getElementById('scannedUrl');
-        apiHandler.connectWithUrl(urlInput?.value);
-    });
-    disconnectApiButton.addEventListener('click', apiHandler.disconnect);
+    // QRScanner.handleCodeFound now just updates the input field value (handled in qrScanner.js).
+    // connectUrlButton listener removed.
+    // disconnectApiButton listener removed.
 
     // --- Other Settings Listeners ---
     suggestThresholdsButton.addEventListener('click', configManager.suggestThresholds);

@@ -22,10 +22,10 @@ export function connectWithUrl(apiUrl = null) {
     if (isConnected) { console.log("Already connected."); return; }
     const urlToConnect = apiUrl || document.getElementById('scannedUrl')?.value;
     if (!urlToConnect || !urlToConnect.startsWith('https://eventsapi.chaturbate.com/events/')) {
-        ui.displayMessage('Invalid Events API URL format.', 'error', 'apiEndpoint'); return;
+        ui.displayMessage('Invalid Events API URL format.', 'error', 'apiEndpointResult'); return; // Use correct ID
     }
     console.log(`Attempting to connect to: ${urlToConnect}`);
-    ui.updateConnectionStatus('connecting');
+    ui.updateConnectionUI('connecting'); // Use the new function name
     try {
         const urlParts = urlToConnect.split('/');
         if (urlParts.length > 4) broadcasterName = urlParts[4];
@@ -33,14 +33,14 @@ export function connectWithUrl(apiUrl = null) {
         console.log(`Extracted broadcaster: ${broadcasterName}`);
     } catch (error) {
         console.error("Error parsing URL:", error);
-        ui.displayMessage(`Error parsing URL: ${error.message}`, 'error', 'apiEndpoint');
-        ui.updateConnectionStatus(false); return;
+        ui.displayMessage(`Error parsing URL: ${error.message}`, 'error', 'apiEndpointResult'); // Use correct ID
+        ui.updateConnectionUI(false); return; // Use the new function name
     }
     if (fetchTimeoutId) clearTimeout(fetchTimeoutId);
     currentUrl = urlToConnect; stopFetching = false; isConnected = true;
     configManager.updateConfig({ scannedUrl: currentUrl, broadcasterName: broadcasterName });
-    ui.updateConnectionStatus(true, currentUrl, broadcasterName);
-    ui.displayMessage(`Connected as ${broadcasterName}. Fetching events...`, 'success', 'apiEndpoint', 10000);
+    ui.updateConnectionUI(true, currentUrl, broadcasterName); // Use the new function name
+    ui.displayMessage(`Connected as ${broadcasterName}. Fetching events...`, 'success', 'apiEndpointResult', 10000); // Use correct ID
     ui.addLogEntry(`Connected to Events API as ${broadcasterName}.`, 'info');
     fetchEvents();
 }
@@ -69,17 +69,26 @@ async function fetchEvents() {
             } else {
                 // No nextUrl means we should retry with the same URL after a delay
                 // This should be rare, as the API typically provides a nextUrl
+                // Note: Messages related to polling/retrying might be better suited for the toggle text area
+                // ui.displayMessage(`Polling...`, 'info', 'connectionToggleStatusText', NO_NEXT_URL_DELAY_MS); // Example: Target toggle text
+                // Keeping original target for now, but consider changing if needed.
                 ui.displayMessage(`Polling...`, 'info', 'connectionStatus', NO_NEXT_URL_DELAY_MS);
                 fetchTimeoutId = setTimeout(fetchEvents, NO_NEXT_URL_DELAY_MS);
             }
         } else {
             console.error(`API request failed: ${response.status} ${response.statusText}`);
+            // Note: Messages related to polling/retrying might be better suited for the toggle text area
+            // ui.displayMessage(`API Error: ${response.status}. Retrying...`, 'error', 'connectionToggleStatusText'); // Example: Target toggle text
+            // Keeping original target for now, but consider changing if needed.
             ui.displayMessage(`API Error: ${response.status}. Retrying...`, 'error', 'connectionStatus');
             fetchTimeoutId = setTimeout(fetchEvents, RETRY_DELAY_MS);
         }
     } catch (error) {
         if (stopFetching) return;
         console.error("Network error during fetch:", error);
+        // Note: Messages related to polling/retrying might be better suited for the toggle text area
+        // ui.displayMessage('Network Error. Retrying...', 'error', 'connectionToggleStatusText'); // Example: Target toggle text
+        // Keeping original target for now, but consider changing if needed.
         ui.displayMessage('Network Error. Retrying...', 'error', 'connectionStatus');
         fetchTimeoutId = setTimeout(fetchEvents, RETRY_DELAY_MS);
     }
@@ -191,7 +200,7 @@ export function disconnect() {
     if (!isConnected) { console.log("Already disconnected."); return; }
     stopFetching = true; isConnected = false;
     if (fetchTimeoutId) { clearTimeout(fetchTimeoutId); fetchTimeoutId = null; }
-    ui.updateConnectionStatus(false);
-    ui.displayMessage("Disconnected from Events API.", 'info', 'apiEndpoint');
+    ui.updateConnectionUI(false); // Use the new function name
+    ui.displayMessage("Disconnected from Events API.", 'info', 'apiEndpointResult'); // Use correct ID
     ui.addLogEntry("Disconnected from Events API.", 'info');
 }

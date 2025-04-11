@@ -10,7 +10,15 @@
 <body>
     <header>
         <h1>Chaturbate Whale Bell</h1>
-        <div id="connectionStatus">Status: Disconnected</div>
+        <!-- Replace connectionStatus div with this toggle switch -->
+        <div class="connection-toggle">
+            <input type="checkbox" id="connectionSwitch" class="connection-switch-checkbox">
+            <label for="connectionSwitch" class="connection-switch-label">
+                <span class="connection-switch-inner"></span>
+                <span class="connection-switch-switch"></span>
+            </label>
+            <span id="connectionToggleStatusText" class="connection-toggle-text">Disconnected</span>
+        </div>
         <button id="settingsButton">Settings</button>
     </header>
 
@@ -29,19 +37,19 @@
         <section id="settingsPanel" style="display: none;">
             <h2>Settings</h2>
 
-            <div id="connectionSettings">
-                <h3>Connection</h3>
-                <button id="startScan">Scan QR Code</button>
-                <video id="qrScanner" style="display: none; width: 300px;"></video>
-                <canvas id="qrCanvas" style="display: none;"></canvas>
-                <button id="cancelScan" style="display: none;">Cancel Scan</button>
-                <br>
-                <label for="scannedUrl">Events API URL:</label>
-                <input type="text" id="scannedUrl" placeholder="Paste URL here">
-                <button id="connectUrl">Connect</button>
-                <button id="disconnectApi">Disconnect</button>
-                <div id="apiEndpoint"></div>
-                <div id="broadcasterNameDisplay"></div>
+            <!-- SECTION 1: API Endpoint Configuration -->
+            <div id="apiEndpointSettings">
+                 <h3>API Endpoint Configuration</h3>
+                 <p class="setting-info">Enter the Events API URL obtained from Chaturbate here. Save configuration, then use the switch in the header to connect.</p>
+                 <button id="startScan">Scan QR Code</button>
+                 <video id="qrScanner" style="display: none; width: 300px;"></video>
+                 <canvas id="qrCanvas" style="display: none;"></canvas>
+                 <button id="cancelScan" style="display: none;">Cancel Scan</button>
+                 <br>
+                 <label for="scannedUrl">Events API URL:</label>
+                 <input type="text" id="scannedUrl" placeholder="Scan QR or paste URL here">
+                 <div id="apiEndpointResult"></div> <!-- Renamed from apiEndpoint -->
+                 <div id="broadcasterNameDisplay"></div>
             </div>
 
             <div id="whaleThresholdsSettings">

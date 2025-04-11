@@ -60,6 +60,8 @@ export async function saveConfig() {
         currentConfig.totalPrivatesThreshold = parseInt(document.getElementById('totalPrivatesThreshold').value, 10) || defaultConfig.totalPrivatesThreshold;
         currentConfig.totalLifetimeTipsThreshold = parseInt(document.getElementById('totalLifetimeTipsThreshold').value, 10) || defaultConfig.totalLifetimeTipsThreshold;
         currentConfig.bellSound = document.getElementById('bellSound').value || defaultConfig.bellSound;
+        // *** Add this line to read the URL from the input field ***
+        currentConfig.scannedUrl = document.getElementById('scannedUrl')?.value || null;
 
         await db.config.put({ id: 'main', ...currentConfig });
         console.log("Configuration saved:", currentConfig);
