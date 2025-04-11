@@ -1,4 +1,5 @@
 // utils.js - Shared utility functions
+import * as ui from './ui.js'; // Import the ui module
 
 /**
  * Debounce function to limit the rate at which a function can fire.
@@ -23,14 +24,22 @@ export function debounce(func, wait, immediate = false) {
 }
 
 /**
- * Simple error display helper (can be expanded or replaced by ui.js).
- * Logs error to console and shows an alert.
- * @param {string} message The error message.
+ * Error display helper. Logs to console and uses the UI message system.
+ * @param {string} message The error message for the user.
  * @param {Error} [errorObject] Optional error object for console logging.
+ * @param {string} [elementId='connectionToggleStatusText'] Optional UI element ID for message display.
  */
-export function displayError(message, errorObject = null) {
-    console.error(message, errorObject || '');
-    alert(`Error: ${message}`);
+export function displayError(message, errorObject = null, elementId = 'connectionToggleStatusText') { // Default to header status text
+    console.error(`Error Util: ${message}`, errorObject || '');
+    // Use the UI system instead of alert()
+    try {
+        // Try displaying in a specific element, fallback to a generic one if needed
+        ui.displayMessage(`Error: ${message}`, 'error', elementId, 8000); // Show for 8 seconds
+    } catch (uiError) {
+        // Fallback if ui.displayMessage itself fails (e.g., during init)
+        console.error("Fallback alert because ui.displayMessage failed:", uiError);
+        alert(`Critical Error: ${message}`); // Keep alert as ultimate fallback
+    }
 }
 
 /**
