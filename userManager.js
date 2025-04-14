@@ -193,6 +193,39 @@ export function markUserOffline(username, shouldSave = true) {
 // --- Refactored Whale Check Logic ---
 
 // Note: This function becomes async because it queries the DB.
+async function getLastEventOfType(username, type, maxLookback = 90) {
+    const now = Date.now();
+    const earliestTimestampISO = new Date(now - maxLookback * 24 * 60 * 60 * 1000).toISOString();
+    
+    try {
+        const events = await db.recentEvents
+            .where('[username+timestamp]')
+            .between([username, earliestTimestampISO], [username, new Date(now).toISOString()], true, true)
+            .filter(event => event.type === type)
+            .reverse() // Most recent first
+            .limit(1)
+            .toArray();
+        
+        return events[0];
+    } catch (error) {
+        console.error(`Error finding last ${type} for ${username}:`, error);
+        return null;
+    }
+}
+
+function getTimeAgo(timestamp) {
+    const now = Date.now();
+    const then = new Date(timestamp).getTime();
+    const days = Math.floor((now - then) / (1000 * 60 * 60 * 24));
+    
+    if (days === 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 7) return `${days} days ago`;
+    if (days < 30) return `${Math.floor(days/7)} weeks ago`;
+    if (days < 365) return `${Math.floor(days/30)} months ago`;
+    return `${Math.floor(days/365)} years ago`;
+}
+
 export async function isWhale(username, thresholds) {
     const user = getUser(username); // Get aggregate data from memory
     if (!user || !user.tokenStats) {
@@ -201,20 +234,53 @@ export async function isWhale(username, thresholds) {
     }
     const stats = user.tokenStats;
 
+    // Get temporal context
+    const lastPrivate = await getLastEventOfType(username, 'privateShow');
+    const lastTip = await getLastEventOfType(username, 'tip');
+    const firstSeenAgo = getTimeAgo(user.firstSeenDate);
+    const lastSeenAgo = getTimeAgo(user.lastSeenDate);
+
+    // Build context message
+    let contextMsg = '';
+    if (user.firstSeenDate) {
+        contextMsg += `\n        • First seen: ${firstSeenAgo}`;
+    }
+    if (lastTip) {
+        contextMsg += `\n        • Last tip: ${getTimeAgo(lastTip.timestamp)} (${lastTip.amount} tokens)`;
+    }
+    if (lastPrivate) {
+        contextMsg += `\n        • Last private: ${getTimeAgo(lastPrivate.timestamp)} (${lastPrivate.amount} tokens)`;
+    }
+
+    // Add welcome back message if they haven't been seen in a while
+    const daysAway = (Date.now() - new Date(user.lastSeenDate).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysAway > 30) {
+        contextMsg += `\n        • Welcome back after ${Math.floor(daysAway)} days!`;
+    }
+
     // --- 1. Check Lifetime Aggregates ---
     if (thresholds.lifetimeSpendingThreshold > 0 && stats.lifetimeTotalSpent >= thresholds.lifetimeSpendingThreshold) {
-        ui.addLogEntry(`🐳 ${username} is WHALE (Lifetime Spend: ${stats.lifetimeTotalSpent} >= ${thresholds.lifetimeSpendingThreshold})`);
+        ui.addLogEntry(`🐳 ${username} is a WHALE!
+        • Total Lifetime: ${stats.lifetimeTotalSpent} tokens
+        • Tips: ${stats.lifetimeTotalTips} tokens
+        • Privates: ${stats.lifetimeTotalPrivates} tokens
+        • Media: ${stats.lifetimeTotalMedia} tokens${contextMsg}`);
         return true;
     }
     if (thresholds.totalLifetimeTipsThreshold > 0 && stats.lifetimeTotalTips >= thresholds.totalLifetimeTipsThreshold) {
-        ui.addLogEntry(`🐳 ${username} is WHALE (Lifetime Tips: ${stats.lifetimeTotalTips} >= ${thresholds.totalLifetimeTipsThreshold})`);
+        ui.addLogEntry(`🐳 ${username} is a TIPPING WHALE!
+        • Total Tips: ${stats.lifetimeTotalTips} tokens
+        • Overall Spent: ${stats.lifetimeTotalSpent} tokens
+        • Privates: ${stats.lifetimeTotalPrivates} tokens${contextMsg}`);
         return true;
     }
     if (thresholds.totalPrivatesThreshold > 0 && stats.lifetimeTotalPrivates >= thresholds.totalPrivatesThreshold) {
-        ui.addLogEntry(`🐳 ${username} is WHALE (Lifetime Privates: ${stats.lifetimeTotalPrivates} >= ${thresholds.totalPrivatesThreshold})`);
+        ui.addLogEntry(`🐳 ${username} is a PRIVATE SHOW WHALE!
+        • Private Shows: ${stats.lifetimeTotalPrivates} tokens
+        • Total Tips: ${stats.lifetimeTotalTips} tokens
+        • Overall Spent: ${stats.lifetimeTotalSpent} tokens${contextMsg}`);
         return true;
     }
-    // Add lifetime media check if needed
 
     // --- 2. Check Recent Activity (Requires DB Query) ---
     let recentEvents = [];
@@ -272,16 +338,20 @@ export async function isWhale(username, thresholds) {
 
     // --- 4. Evaluate Recent Thresholds ---
     if (recentTipSeconds > 0 && thresholds.recentTipThreshold > 0 && recentTipSum >= thresholds.recentTipThreshold) {
-        ui.addLogEntry(`🐳 ${username} is WHALE (Recent Tips: ${recentTipSum} >= ${thresholds.recentTipThreshold} in ${recentTipSeconds}s)`);
+        ui.addLogEntry(`🐳 ${username} is a RECENT WHALE!
+        • Recent Tips: ${recentTipSum} tokens in last ${Math.floor(recentTipSeconds/60)}min
+        • Lifetime Total: ${stats.lifetimeTotalSpent} tokens${contextMsg}`);
         return true;
     }
     if (recentTipSeconds > 0 && largeTipThreshold > 0 && foundLargeTip) {
-        // Log the specific large tip amount? The loop doesn't store it easily here.
-        ui.addLogEntry(`🐳 ${username} is WHALE (Large Tip >= ${largeTipThreshold} in ${recentTipSeconds}s)`);
+        ui.addLogEntry(`🐳 ${username} is a BIG TIPPER WHALE!
+        • Large Tip: ${largeTipThreshold}+ tokens
+        • Total Tips: ${stats.lifetimeTotalTips} tokens
+        • Overall Spent: ${stats.lifetimeTotalSpent} tokens${contextMsg}`);
         return true;
     }
     if (recentPrivateSeconds > 0 && thresholds.recentPrivateThreshold > 0 && recentPrivateSum >= thresholds.recentPrivateThreshold) {
-        ui.addLogEntry(`🐳 ${username} is WHALE (Recent Privates: ${recentPrivateSum} >= ${thresholds.recentPrivateThreshold} in ${recentPrivateSeconds}s)`);
+        ui.addLogEntry(`🐳 ${username} is a WHALE (Recent Privates: ${recentPrivateSum} >= ${thresholds.recentPrivateThreshold} in ${recentPrivateSeconds}s)${contextMsg}`);
         return true;
     }
 
