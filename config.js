@@ -18,6 +18,7 @@ const defaultConfig = {
     totalPrivatesThreshold: 10000,
     totalLifetimeTipsThreshold: 5000,
     bellSound: "default_bell.mp3",
+    recentEventRetentionDays: 30, // Added: Default retention period in days
 };
 
 let currentConfig = { ...defaultConfig };
@@ -60,9 +61,13 @@ export async function saveConfig() {
         currentConfig.totalPrivatesThreshold = parseInt(document.getElementById('totalPrivatesThreshold').value, 10) || defaultConfig.totalPrivatesThreshold;
         currentConfig.totalLifetimeTipsThreshold = parseInt(document.getElementById('totalLifetimeTipsThreshold').value, 10) || defaultConfig.totalLifetimeTipsThreshold;
         currentConfig.bellSound = document.getElementById('bellSound').value || defaultConfig.bellSound;
-        // *** Add this line to read the URL from the input field ***
+        currentConfig.recentEventRetentionDays = parseInt(document.getElementById('recentEventRetentionDays')?.value, 10) || defaultConfig.recentEventRetentionDays; // Added
+        // Ensure retention days is at least 1
+        if (currentConfig.recentEventRetentionDays < 1) {
+            console.warn(`Retention period cannot be less than 1 day. Setting to 1.`);
+            currentConfig.recentEventRetentionDays = 1;
+        }
         currentConfig.scannedUrl = document.getElementById('scannedUrl')?.value || null;
-
         await db.config.put({ id: 'main', ...currentConfig });
         console.log("Configuration saved:", currentConfig);
         // Update the read-only display after saving
@@ -97,7 +102,8 @@ export async function resetConfig() {
 
 // --- Threshold Suggestion ---
 
-export function suggestThresholds() {
+// Made async because getSpentInPeriod is now async
+export async function suggestThresholds() {
     console.log("Suggesting thresholds based on user data...");
     ui.displayMessage("Analyzing user data for suggestions...", "info", "dataManagementResult", 0);
 
@@ -115,12 +121,14 @@ export function suggestThresholds() {
         const lifetimeTips = users.map(u => u.tokenStats?.totalTips || 0).filter(t => t > 0);
         const lifetimePrivates = users.map(u => u.tokenStats?.totalPrivates || 0).filter(p => p > 0);
 
-        // Calculate recent spending (e.g., last 7 days) - requires getSpentInPeriod
-        const recentTipDays = Math.ceil((currentConfig.recentTipTimeframe || 3600) / 86400);
-        const recentTips = users.map(u => userManager.getSpentInPeriod(u.username, recentTipDays, 'tips')).filter(t => t > 0);
+        // Calculate recent spending (e.g., last 7 days) - now requires await
+        const recentTipDays = Math.max(1, Math.ceil((currentConfig.recentTipTimeframe || 3600) / 86400)); // Ensure at least 1 day
+        const recentTipsPromises = users.map(u => userManager.getSpentInPeriod(u.username, recentTipDays, 'tips'));
+        const recentTips = (await Promise.all(recentTipsPromises)).filter(t => t > 0);
 
-        const recentPrivateDays = Math.ceil((currentConfig.recentPrivateTimeframe || 86400) / 86400);
-        const recentPrivates = users.map(u => userManager.getSpentInPeriod(u.username, recentPrivateDays, 'privates')).filter(p => p > 0);
+        const recentPrivateDays = Math.max(1, Math.ceil((currentConfig.recentPrivateTimeframe || 86400) / 86400)); // Ensure at least 1 day
+        const recentPrivatesPromises = users.map(u => userManager.getSpentInPeriod(u.username, recentPrivateDays, 'privates'));
+        const recentPrivates = (await Promise.all(recentPrivatesPromises)).filter(p => p > 0);
 
         // --- Calculate Percentiles ---
         // Percentiles to calculate (e.g., 75th, 90th, 95th)

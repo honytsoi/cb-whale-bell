@@ -170,6 +170,12 @@ export function populateSettings() {
         totalLifetimeTipsThresholdInput.value = config.totalLifetimeTipsThreshold ?? '';
         // bellSoundSelect.value = config.bellSound || 'default_bell.mp3'; // Removed select
 
+        // Populate the new retention days field
+        const retentionDaysInput = document.getElementById('recentEventRetentionDays');
+        if (retentionDaysInput) {
+            retentionDaysInput.value = config.recentEventRetentionDays ?? 30; // Default to 30 if missing
+        }
+
         // Also populate the scannedUrl input field in settings
         const scannedUrlInput = document.getElementById('scannedUrl');
         if (scannedUrlInput) {

@@ -4,145 +4,142 @@ import { debounce, displayError, parseTimestamp } from './utils.js';
 import * as ui from './ui.js'; // Import ui for logging whale status
 import db from './db.js';
 
-const USERS_KEY = 'whaleBellUsers';
-const MAX_HISTORY_PER_USER = 1000; // As per spec
-const PRUNE_PERCENTAGE = 0.75; // Prune 75% of users on QuotaExceededError (More aggressive)
-const MAX_PRUNE_ATTEMPTS = 3; // Limit pruning attempts to prevent infinite loops
+// Constants for the new strategy (if any needed later)
+// const MAX_HISTORY_PER_USER = 1000; // REMOVED - No longer storing full history per user
+// const PRUNE_PERCENTAGE = 0.75; // REMOVED - Pruning strategy changed to time-based event deletion
+// const MAX_PRUNE_ATTEMPTS = 3; // REMOVED
 
-let users = new Map(); // In-memory store for user data
+let users = new Map(); // In-memory store for user *aggregate* data
 
 // --- Core Methods ---
 
 export async function loadUsers() {
     try {
+        // Load aggregate user data from the 'users' store
         const usersArray = await db.users.toArray();
         users.clear();
         usersArray.forEach(user => {
-            users.set(user.id, user);
+            // Key is username, value is the aggregate user object
+            users.set(user.username, user);
         });
-        console.log(`Loaded ${users.size} users from IndexedDB`);
+        console.log(`Loaded ${users.size} user aggregates from IndexedDB`);
     } catch (error) {
         console.error('Error loading users:', error);
         throw error;
     }
 }
 
-function createDefaultTokenStats(username) {
-     return {
-        username: username,
-        totalSpent: 0, totalTips: 0, totalPrivates: 0, totalMedia: 0,
-        lastUpdated: null,
-        timePeriods: {
-            'd1': { total: 0, tips: 0, privates: 0, media: 0 },
-            'd7': { total: 0, tips: 0, privates: 0, media: 0 },
-            'd30': { total: 0, tips: 0, privates: 0, media: 0 },
-        }
+// Creates the structure for lifetime aggregate stats
+function createLifetimeTokenStats(username) {
+    return {
+        username: username, // Keep for reference if needed within stats object
+        lifetimeTotalSpent: 0,
+        lifetimeTotalTips: 0,
+        lifetimeTotalPrivates: 0,
+        lifetimeTotalMedia: 0,
+        lastUpdated: null // Timestamp of the last event processed for this user
     };
 }
 
 export async function saveUsers() {
     try {
+        // Save the aggregate user data (values from the map)
         const usersArray = Array.from(users.values());
-        
-        // Validate and ensure all users have an id field
-        const validUsers = usersArray.map(user => {
-            if (!user.id) {
-                user.id = user.username; // Use username as id if missing
-            }
-            return user;
-        });
-        
-        await db.users.bulkPut(validUsers);
-        console.log(`Saved ${validUsers.length} users to IndexedDB`);
+        await db.users.bulkPut(usersArray);
+        // console.log(`Saved ${usersArray.length} user aggregates to IndexedDB`); // Less verbose logging
     } catch (error) {
-        console.error('Error saving users:', error);
+        console.error('Error saving user aggregates:', error);
+        // Avoid throwing here if possible, maybe retry or log more context
+        // Consider if save failures should block operation or just be logged.
+        // For now, re-throwing to maintain original behavior pattern.
         throw error;
     }
 }
 
+// Refactored addEvent for Aggregate & Tiered Retention strategy
 export async function addEvent(username, type, data) {
-    const isNewUser = addUser(username);
+    const isNewUser = addUser(username); // Ensures user aggregate record exists in memory
     const user = getUser(username);
     const eventData = data || {};
     const timestamp = parseTimestamp(eventData.timestamp) || new Date().toISOString();
+    const amount = typeof eventData.amount === 'number' ? eventData.amount : 0;
 
-    // Create event object
-    const event = {
-        userId: username,
-        type: type,
+    // --- 1. Update In-Memory Aggregates ---
+    if (!user.firstSeenDate || timestamp < user.firstSeenDate) {
+        user.firstSeenDate = timestamp;
+    }
+    user.lastSeenDate = timestamp; // Always update last seen on any event
+    user.tokenStats.lastUpdated = timestamp;
+
+    if (amount > 0) {
+        user.tokenStats.lifetimeTotalSpent += amount;
+        if (type === 'tip') {
+            user.tokenStats.lifetimeTotalTips += amount;
+        } else if (type === 'privateShow' || type === 'privateShowSpy') {
+            user.tokenStats.lifetimeTotalPrivates += amount;
+        } else if (type === 'mediaPurchase') {
+            user.tokenStats.lifetimeTotalMedia += amount;
+        }
+    }
+
+    // Handle online/offline status (affects aggregate record only)
+    if (type === 'userEnter') {
+        user.isOnline = true;
+    } else if (type === 'userLeave') {
+        user.isOnline = false;
+    }
+
+    // --- 2. Create Detailed Event Record for Recent Storage ---
+    const eventRecord = {
+        username: username,
         timestamp: timestamp,
-        data: { ...eventData }
+        type: type,
+        amount: amount,
+        note: eventData.note || ''
+        // Add other relevant details from 'data' if needed for recent queries
+        // e.g., targetUsername for tips if that becomes relevant
     };
 
+    // --- 3. Persist Changes ---
     try {
-        // Store in IndexedDB
-        console.log(`userManager.addEvent: Preparing to save event for user ${username}:`, JSON.stringify(event, null, 2));
-        await db.events.add(event);
-        console.log(`userManager.addEvent: Event added to DB for user ${username}.`);
-        // Update in-memory user data
-        if (!user.firstSeenDate || timestamp < user.firstSeenDate) user.firstSeenDate = timestamp;
-        if (!user.lastSeenDate || timestamp > user.lastSeenDate) user.lastSeenDate = timestamp;
+        // Add detailed event to the recent events store
+        await db.recentEvents.add(eventRecord);
 
-        // Update event history
-        user.eventHistory.unshift(event);
-        if (user.eventHistory.length > user.maxHistory) user.eventHistory.pop();
+        // Trigger debounced save for the updated aggregate user data
+        saveUsersDebounced();
 
-        // Update stats if event has amount
-        if (eventData && typeof eventData.amount === 'number' && eventData.amount > 0) {
-            updateTokenStats(user, event);
-        }
-
-        // Handle online/offline status
-        if (type === 'userEnter') markUserOnline(username, false);
-        else if (type === 'userLeave') markUserOffline(username, false);
-
-        // Save changes
-        // console.log(`userManager.addEvent: Preparing to save user map state after event processing for ${username}. Current user state:`, JSON.stringify(getUser(username), null, 2));
-        await saveUsers();
-        
         return isNewUser;
     } catch (error) {
-        console.error('Error adding event:', error, "User:", JSON.stringify(getUser(username), null, 2), "Event:", JSON.stringify(event, null, 2));
+        console.error(`Failed to add event to recentEvents store for ${username}:`, error, "Event:", eventRecord);
+        // Decide on error handling: Should this stop processing? Log and continue?
+        // For now, re-throwing to signal failure upstream.
         throw error;
     }
 }
 
 // Debounced save function
-export const saveUsersDebounced = debounce(saveUsers, 5000); // Increased from 1500ms to 5000ms
+// Debounced save function for user aggregates
+export const saveUsersDebounced = debounce(saveUsers, 3000); // 3 seconds debounce seems reasonable
 
-// Returns the number of users pruned
-function handleQuotaExceededError() {
-    const userCount = users.size;
-    if (userCount <= 1) { console.warn("Pruning skipped: 1 or 0 users remaining."); return 0; }
-    const usersArray = Array.from(users.values());
-    usersArray.sort((a, b) => {
-        const dateA = a.lastSeenDate ? new Date(a.lastSeenDate).getTime() : 0;
-        const dateB = b.lastSeenDate ? new Date(b.lastSeenDate).getTime() : 0;
-        return dateA - dateB; // Oldest first
-    });
-    const numberToPrune = Math.max(1, Math.min(userCount - 1, Math.floor(userCount * PRUNE_PERCENTAGE)));
-    const usersToPrune = usersArray.slice(0, numberToPrune);
-    if (usersToPrune.length === 0) { console.warn("Pruning calculation resulted in 0 users to prune."); return 0; }
-    console.log(`Pruning ${usersToPrune.length} users (oldest seen):`, usersToPrune.map(u => u.username));
-    usersToPrune.forEach(user => users.delete(user.username));
-    console.log(`User count after pruning: ${users.size}`);
-    return usersToPrune.length;
-}
+// REMOVED: handleQuotaExceededError - Pruning is now handled by deleting old events from recentEvents store, not users.
 
 
+// Creates or ensures an aggregate user record exists in the in-memory map
 export function addUser(username) {
     let isNew = false;
     if (!users.has(username)) {
         isNew = true;
         users.set(username, {
-            id: username, // Add id field matching username
+            // No 'id' field needed, username is the key in the map and DB
             username: username,
-            firstSeenDate: null, lastSeenDate: null, isOnline: false,
-            eventHistory: [],
-            tokenStats: createDefaultTokenStats(username),
-            maxHistory: MAX_HISTORY_PER_USER
+            firstSeenDate: null,
+            lastSeenDate: null,
+            isOnline: false,
+            // No 'eventHistory' or 'maxHistory'
+            tokenStats: createLifetimeTokenStats(username) // Use the new stats structure
         });
-        saveUsersDebounced();
+        // Don't save immediately, let addEvent trigger the debounced save
+        // saveUsersDebounced();
     }
     return isNew;
 }
@@ -155,116 +152,10 @@ export function getAllUsers() {
     return new Map(users); // Return a copy
 }
 
-// --- Token Stats Calculation with Detailed Logging ---
+// REMOVED: updateTokenStats - Aggregate updates are now handled directly within addEvent.
 
-function updateTokenStats(user, event) {
-    const amount = event.data.amount;
-    if (typeof amount !== 'number' || amount <= 0) return;
-
-    const eventTime = new Date(event.timestamp).getTime();
-    const now = Date.now();
-    const stats = user.tokenStats;
-
-    // Remove console.group and detailed logging
-    stats.totalSpent = (stats.totalSpent || 0) + amount;
-    let category = 'other';
-        
-    if (event.type === 'tip') {
-        stats.totalTips = (stats.totalTips || 0) + amount;
-        category = 'tips';
-    } else if (event.type === 'privateShow' || event.type === 'privateShowSpy') {
-        stats.totalPrivates = (stats.totalPrivates || 0) + amount;
-        category = 'privates';
-    } else if (event.type === 'mediaPurchase') {
-        stats.totalMedia = (stats.totalMedia || 0) + amount;
-        category = 'media';
-    }
-
-    // Period stats adjustment
-    for (const periodKey in stats.timePeriods) {
-        const days = parseInt(periodKey.substring(1));
-        if (isNaN(days)) continue;
-        const periodStart = now - days * 24 * 60 * 60 * 1000;
-        if (eventTime >= periodStart) {
-            const periodStats = stats.timePeriods[periodKey];
-            periodStats.total = (periodStats.total || 0) + amount;
-            if (category !== 'other') {
-                periodStats[category] = (periodStats[category] || 0) + amount;
-            }
-        }
-    }
-        
-    stats.lastUpdated = new Date().toISOString();
-}
-
-export function recalculateAllUserStats() {
-    console.log("Recalculating stats for all users...");
-    let count = 0;
-    users.forEach(user => { recalculateTotals(user, false); count++; });
-    saveUsersDebounced();
-    console.log(`Recalculation complete for ${count} users.`);
-}
-
-export function recalculateTotals(user, shouldSave = true) {
-    if (!user) return;
-    user.tokenStats = createDefaultTokenStats(user.username); // Reset stats
-    const stats = user.tokenStats;
-    const now = Date.now();
-    let processedPrivateMeta = false;
-
-    console.groupCollapsed(`Recalculating Stats for: ${user.username}`);
-
-    try {
-        for (let i = user.eventHistory.length - 1; i >= 0; i--) {
-            const event = user.eventHistory[i];
-            if (event.data && typeof event.data.amount === 'number' && event.data.amount > 0) {
-                const amount = event.data.amount;
-                const eventTime = new Date(event.timestamp).getTime();
-                stats.totalSpent += amount;
-                let category = 'other';
-
-                console.log(` -> Processing event [${i}]: type='${event.type}', amount=${amount}, timestamp='${event.timestamp}'`);
-
-                if (event.type === 'tip') {
-                    stats.totalTips += amount;
-                    category = 'tips';
-                    console.log(`    -> Added to totalTips. New totalTips: ${stats.totalTips}`);
-                }
-                else if (event.type === 'privateShow' || event.type === 'privateShowSpy') {
-                    stats.totalPrivates += amount;
-                    category = 'privates';
-                    processedPrivateMeta = true;
-                    console.log(`    -> Added to totalPrivates. New totalPrivates: ${stats.totalPrivates}`);
-                }
-                else if (event.type === 'mediaPurchase') {
-                    stats.totalMedia += amount;
-                    category = 'media';
-                    console.log(`    -> Added to totalMedia. New totalMedia: ${stats.totalMedia}`);
-                }
-
-                // Update period stats
-                for (const periodKey in stats.timePeriods) {
-                    const days = parseInt(periodKey.substring(1));
-                    if (isNaN(days)) continue;
-                    const periodStart = now - days * 24 * 60 * 60 * 1000;
-                    if (eventTime >= periodStart) {
-                        const periodStats = stats.timePeriods[periodKey];
-                        periodStats.total = (periodStats.total || 0) + amount;
-                        if (category !== 'other') {
-                            periodStats[category] = (periodStats[category] || 0) + amount;
-                        }
-                        console.log(`    -> Period ${periodKey}: Total=${periodStats.total}, ${category}=${periodStats[category]}`);
-                    }
-                }
-            }
-        }
-    } finally {
-        console.groupEnd();
-    }
-
-    stats.lastUpdated = new Date().toISOString();
-    if (shouldSave) saveUsersDebounced();
-}
+// REMOVED: recalculateAllUserStats - Aggregation is live; recalculation from history is not possible/needed.
+// REMOVED: recalculateTotals - Aggregation is live; recalculation from history is not possible/needed.
 
 // --- Online/Offline Status ---
 
@@ -284,162 +175,210 @@ export function markUserOffline(username, shouldSave = true) {
     }
 }
 
-// --- Whale Check Logic with Detailed Logging ---
+// --- Refactored Whale Check Logic ---
 
-export function isWhale(username, thresholds) {
-    const user = getUser(username);
-    if (!user || !user.tokenStats) { return false; }
+// Note: This function becomes async because it queries the DB.
+export async function isWhale(username, thresholds) {
+    const user = getUser(username); // Get aggregate data from memory
+    if (!user || !user.tokenStats) {
+        // console.debug(`isWhale: User ${username} not found or no stats.`);
+        return false;
+    }
     const stats = user.tokenStats;
-    
-    console.group(`🐳 Whale Check for ${username}`);
-    console.log(`User stats:`, {
-        totalSpent: stats.totalSpent,
-        totalTips: stats.totalTips,
-        totalPrivates: stats.totalPrivates,
-        totalMedia: stats.totalMedia
-    });
-    
-    // Check lifetime spending first (most common case)
-    console.log(`Lifetime spending check: ${stats.totalSpent} >= ${thresholds.lifetimeSpendingThreshold}`);
-    if (stats.totalSpent >= thresholds.lifetimeSpendingThreshold) {
-        console.log(`✨ IS WHALE: Lifetime spending threshold met`);
-        console.groupEnd();
+
+    // --- 1. Check Lifetime Aggregates ---
+    if (thresholds.lifetimeSpendingThreshold > 0 && stats.lifetimeTotalSpent >= thresholds.lifetimeSpendingThreshold) {
+        ui.addLogEntry(`🐳 ${username} is WHALE (Lifetime Spend: ${stats.lifetimeTotalSpent} >= ${thresholds.lifetimeSpendingThreshold})`);
         return true;
     }
-
-    // Check lifetime tips
-    console.log(`Lifetime tips check: ${stats.totalTips} >= ${thresholds.totalLifetimeTipsThreshold}`);
-    if (stats.totalTips >= thresholds.totalLifetimeTipsThreshold) {
-        console.log(`✨ IS WHALE: Lifetime tips threshold met`);
-        console.groupEnd();
+    if (thresholds.totalLifetimeTipsThreshold > 0 && stats.lifetimeTotalTips >= thresholds.totalLifetimeTipsThreshold) {
+        ui.addLogEntry(`🐳 ${username} is WHALE (Lifetime Tips: ${stats.lifetimeTotalTips} >= ${thresholds.totalLifetimeTipsThreshold})`);
         return true;
     }
-
-    // Check lifetime privates
-    console.log(`Lifetime privates check: ${stats.totalPrivates} >= ${thresholds.totalPrivatesThreshold}`);
-    if (stats.totalPrivates >= thresholds.totalPrivatesThreshold) {
-        console.log(`✨ IS WHALE: Lifetime privates threshold met`);
-        console.groupEnd();
+    if (thresholds.totalPrivatesThreshold > 0 && stats.lifetimeTotalPrivates >= thresholds.totalPrivatesThreshold) {
+        ui.addLogEntry(`🐳 ${username} is WHALE (Lifetime Privates: ${stats.lifetimeTotalPrivates} >= ${thresholds.totalPrivatesThreshold})`);
         return true;
     }
+    // Add lifetime media check if needed
 
-    // Check recent tips if timeframe > 0
-    const recentTipSeconds = thresholds.recentTipTimeframe;
-    if (recentTipSeconds > 0) {
-        const recentTipDays = Math.ceil(recentTipSeconds / 86400);
-        const recentTips = getSpentInPeriod(username, recentTipDays, 'tips');
-        console.log(`Recent tips check (${recentTipDays} days): ${recentTips} >= ${thresholds.recentTipThreshold}`);
-        if (recentTips >= thresholds.recentTipThreshold) {
-            console.log(`✨ IS WHALE: Recent tips threshold met`);
-            console.groupEnd();
-            return true;
+    // --- 2. Check Recent Activity (Requires DB Query) ---
+    let recentEvents = [];
+    const now = Date.now();
+    const recentTipSeconds = thresholds.recentTipTimeframe || 0;
+    const recentPrivateSeconds = thresholds.recentPrivateTimeframe || 0;
+    const largeTipThreshold = thresholds.recentLargeTipThreshold || 0;
+
+    // Determine the maximum lookback needed for any recent check
+    const maxLookbackSeconds = Math.max(recentTipSeconds, recentPrivateSeconds);
+
+    if (maxLookbackSeconds > 0) {
+        try {
+            const earliestTimestampISO = new Date(now - maxLookbackSeconds * 1000).toISOString();
+            // console.debug(`isWhale: Querying recentEvents for ${username} from ${earliestTimestampISO}`);
+            recentEvents = await db.recentEvents
+                .where('[username+timestamp]')
+                .between([username, earliestTimestampISO], [username, new Date(now).toISOString()], true, true) // Inclusive start, inclusive end
+                .toArray();
+            // console.debug(`isWhale: Found ${recentEvents.length} recent events for ${username}`);
+        } catch (error) {
+            console.error(`Error querying recentEvents for ${username} in isWhale:`, error);
+            return false; // Cannot perform recent checks if DB query fails
         }
+    } else {
+        // console.debug(`isWhale: No recent timeframes configured for ${username}, skipping DB query.`);
     }
 
-    // Check recent privates if timeframe > 0
-    const recentPrivateSeconds = thresholds.recentPrivateTimeframe;
-    if (recentPrivateSeconds > 0) {
-        const recentPrivateDays = Math.ceil(recentPrivateSeconds / 86400);
-        const recentPrivates = getSpentInPeriod(username, recentPrivateDays, 'privates');
-        console.log(`Recent privates check (${recentPrivateDays} days): ${recentPrivates} >= ${thresholds.recentPrivateThreshold}`);
-        if (recentPrivates >= thresholds.recentPrivateThreshold) {
-            console.log(`✨ IS WHALE: Recent privates threshold met`);
-            console.groupEnd();
-            return true;
-        }
-    }
 
-    // Check large tips if threshold > 0
-    const largeTipThreshold = thresholds.recentLargeTipThreshold;
-    if (largeTipThreshold > 0 && recentTipSeconds > 0) {
-        const periodStart = Date.now() - recentTipSeconds * 1000;
-        console.log(`Checking for large tips >= ${largeTipThreshold} in last ${recentTipSeconds} seconds...`);
-        for (const event of user.eventHistory) {
-            const eventTime = new Date(event.timestamp).getTime();
-            if (eventTime < periodStart) break;
-            if (event.type === 'tip' && event.data?.amount >= largeTipThreshold) {
-                console.log(`✨ IS WHALE: Large single tip found (${event.data.amount} tokens) at ${event.timestamp}`);
-                console.groupEnd();
-                return true;
+    // --- 3. Process Recent Events for Threshold Checks ---
+    let recentTipSum = 0;
+    let recentPrivateSum = 0;
+    let foundLargeTip = false;
+
+    const recentTipCutoff = now - recentTipSeconds * 1000;
+    const recentPrivateCutoff = now - recentPrivateSeconds * 1000;
+
+    for (const event of recentEvents) {
+        const eventTime = new Date(event.timestamp).getTime();
+
+        // Check Recent Tips
+        if (recentTipSeconds > 0 && event.type === 'tip' && eventTime >= recentTipCutoff) {
+            recentTipSum += event.amount;
+            // Check Large Single Tip (within the recent tip timeframe)
+            if (largeTipThreshold > 0 && event.amount >= largeTipThreshold) {
+                foundLargeTip = true;
             }
         }
+
+        // Check Recent Privates
+        if (recentPrivateSeconds > 0 && (event.type === 'privateShow' || event.type === 'privateShowSpy') && eventTime >= recentPrivateCutoff) {
+            recentPrivateSum += event.amount;
+        }
     }
 
-    console.log(`❌ Not a whale: No thresholds met`);
-    console.groupEnd();
+    // --- 4. Evaluate Recent Thresholds ---
+    if (recentTipSeconds > 0 && thresholds.recentTipThreshold > 0 && recentTipSum >= thresholds.recentTipThreshold) {
+        ui.addLogEntry(`🐳 ${username} is WHALE (Recent Tips: ${recentTipSum} >= ${thresholds.recentTipThreshold} in ${recentTipSeconds}s)`);
+        return true;
+    }
+    if (recentTipSeconds > 0 && largeTipThreshold > 0 && foundLargeTip) {
+        // Log the specific large tip amount? The loop doesn't store it easily here.
+        ui.addLogEntry(`🐳 ${username} is WHALE (Large Tip >= ${largeTipThreshold} in ${recentTipSeconds}s)`);
+        return true;
+    }
+    if (recentPrivateSeconds > 0 && thresholds.recentPrivateThreshold > 0 && recentPrivateSum >= thresholds.recentPrivateThreshold) {
+        ui.addLogEntry(`🐳 ${username} is WHALE (Recent Privates: ${recentPrivateSum} >= ${thresholds.recentPrivateThreshold} in ${recentPrivateSeconds}s)`);
+        return true;
+    }
+
+    // console.debug(`isWhale: ${username} did not meet any whale criteria.`);
     return false;
 }
 
 // --- User Data Management ---
 
-export function clearAllUsers() {
-    console.log("Clearing all user data...");
-    users.clear();
-    saveUsers(); // Persist immediately
+// Clears both aggregate user data and recent events
+export async function clearAllUsers() {
+    console.log("Clearing all user aggregates and recent events...");
+    users.clear(); // Clear in-memory map
+    try {
+        await db.transaction('rw', db.users, db.recentEvents, async () => {
+            await db.users.clear();
+            await db.recentEvents.clear();
+        });
+        console.log("Cleared users and recentEvents tables in IndexedDB.");
+    } catch (error) {
+        console.error("Error clearing user data from IndexedDB:", error);
+        // Decide if UI feedback is needed
+        displayError("Failed to clear all user data from the database.");
+    }
+    // No need to call saveUsers() as we just cleared everything.
 }
 
+// Imports a user aggregate record (assumes new format)
 export function importUser(userObject) {
-     if (!userObject || !userObject.username) { console.warn("Skipping invalid user object during import:", userObject); return; }
-     const username = userObject.username;
-     const defaultStats = createDefaultTokenStats(username);
-     userObject.id = username; // Ensure id field exists
-     userObject.tokenStats = { ...defaultStats, ...(userObject.tokenStats || {}) };
-     userObject.tokenStats.timePeriods = { ...defaultStats.timePeriods, ...(userObject.tokenStats.timePeriods || {}) };
-     if (!userObject.eventHistory) userObject.eventHistory = [];
-     if (!userObject.maxHistory) userObject.maxHistory = MAX_HISTORY_PER_USER;
-     userObject.isOnline = false;
-     users.set(username, userObject);
+    if (!userObject || !userObject.username) {
+        console.warn("Skipping invalid user object during import:", userObject);
+        return;
+    }
+    const username = userObject.username;
+    const defaultLifetimeStats = createLifetimeTokenStats(username);
+
+    // Create a clean aggregate object based on the expected structure
+    const aggregateUser = {
+        username: username,
+        firstSeenDate: userObject.firstSeenDate || null,
+        lastSeenDate: userObject.lastSeenDate || null,
+        isOnline: false, // Assume offline on import
+        tokenStats: {
+            ...defaultLifetimeStats, // Start with defaults
+            ...(userObject.tokenStats || {}) // Overlay imported stats
+        }
+        // Ensure no eventHistory or timePeriods are carried over
+    };
+    // Remove potentially invalid fields from imported stats
+    delete aggregateUser.tokenStats.timePeriods;
+    delete aggregateUser.tokenStats.totalSpent; // Use lifetimeTotalSpent etc.
+    delete aggregateUser.tokenStats.totalTips;
+    delete aggregateUser.tokenStats.totalPrivates;
+    delete aggregateUser.tokenStats.totalMedia;
+
+
+    users.set(username, aggregateUser);
 }
+// Note: Importing detailed *recentEvents* is not handled here.
+// The plan suggests import should replace data initially.
 
 // --- Getters for Stats ---
+// Gets a *copy* of the user's lifetime aggregate stats
 export function getUserStats(username) {
     const user = getUser(username);
-    return user ? JSON.parse(JSON.stringify(user.tokenStats)) : createDefaultTokenStats(username);
+    // Return a deep copy to prevent accidental modification of the in-memory store
+    return user ? JSON.parse(JSON.stringify(user.tokenStats)) : createLifetimeTokenStats(username);
 }
 
-export function getTotalSpent(username) { return getUserStats(username).totalSpent; }
-export function getTotalTips(username) { return getUserStats(username).totalTips; }
-export function getTotalPrivates(username) { return getUserStats(username).totalPrivates; }
+// Getters for specific lifetime stats
+export function getTotalSpent(username) { return getUserStats(username).lifetimeTotalSpent; }
+export function getTotalTips(username) { return getUserStats(username).lifetimeTotalTips; }
+export function getTotalPrivates(username) { return getUserStats(username).lifetimeTotalPrivates; }
+export function getTotalMedia(username) { return getUserStats(username).lifetimeTotalMedia; } // Added getter for media
 
-export function getSpentInPeriod(username, days, category = 'total') {
-    const user = getUser(username);
-    if (!user || !user.tokenStats?.timePeriods) return 0;
-    const periodKey = `d${days}`;
-    const periodStats = user.tokenStats.timePeriods[periodKey];
-    if (!periodStats) {
-        console.warn(`Pre-calculated stats for period ${periodKey} not found for user ${username}. Recalculating might be needed.`);
-        return calculateSpentInPeriodOnTheFly(user, days, category);
-    }
-    return periodStats[category] || 0;
-}
+// Refactored getSpentInPeriod to query recentEvents store
+// Note: This function becomes async because it queries the DB.
+export async function getSpentInPeriod(username, days, category = 'total') {
+    if (days <= 0) return 0;
 
-function calculateSpentInPeriodOnTheFly(user, days, category = 'all') {
-    if (!user) return 0;
     const now = Date.now();
-    const periodStart = now - days * 24 * 60 * 60 * 1000;
+    const startTimeISO = new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
     let totalSpentInPeriod = 0;
-    
-    for (const event of user.eventHistory) {
-        const eventTime = new Date(event.timestamp).getTime();
-        if (eventTime < periodStart) break;
-        
-        if (event.data && typeof event.data.amount === 'number' && event.data.amount > 0) {
-            const amount = event.data.amount;
-            const type = event.type;
-            
-            if (category === 'all' || category === 'total') {
-                totalSpentInPeriod += amount;
-            }
-            else if (category === 'tips' && type === 'tip') {
-                totalSpentInPeriod += amount;
-            }
-            else if (category === 'privates' && (type === 'privateShow' || type === 'privateShowSpy')) {
-                totalSpentInPeriod += amount;
-            }
-            else if (category === 'media' && type === 'mediaPurchase') {
-                totalSpentInPeriod += amount;
+
+    try {
+        const recentUserEvents = await db.recentEvents
+            .where('[username+timestamp]')
+            .between([username, startTimeISO], [username, new Date(now).toISOString()], true, true)
+            .toArray();
+
+        for (const event of recentUserEvents) {
+            if (event.amount > 0) {
+                const amount = event.amount;
+                const type = event.type;
+
+                if (category === 'total') {
+                    totalSpentInPeriod += amount;
+                } else if (category === 'tips' && type === 'tip') {
+                    totalSpentInPeriod += amount;
+                } else if (category === 'privates' && (type === 'privateShow' || type === 'privateShowSpy')) {
+                    totalSpentInPeriod += amount;
+                } else if (category === 'media' && type === 'mediaPurchase') {
+                    totalSpentInPeriod += amount;
+                }
+                // Add other categories if needed
             }
         }
+        return totalSpentInPeriod;
+    } catch (error) {
+        console.error(`Error querying recentEvents for ${username} in getSpentInPeriod:`, error);
+        return 0; // Return 0 on error
     }
-    return totalSpentInPeriod;
 }
+
+// REMOVED: calculateSpentInPeriodOnTheFly - Replaced by the async getSpentInPeriod above.

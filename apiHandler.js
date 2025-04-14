@@ -94,8 +94,8 @@ async function fetchEvents() {
     }
 }
 
-// --- Event Processing Logic ---
-function processEvent(event) {
+// --- Event Processing Logic (Now Async) ---
+async function processEvent(event) { // Marked as async
     if (!event || !event.method || !event.object) { console.warn("Skipping invalid event object:", event); return; }
     const { method, object } = event;
     const timestamp = parseTimestamp(event.timestamp) || new Date().toISOString();
@@ -112,8 +112,8 @@ function processEvent(event) {
             case 'userEnter': {
                 const username = object.user?.username;
                 if (username && username !== 'Anonymous') {
-                    // Add event first, which also marks user online and returns if they were new
-                    const isNewUser = userManager.addEvent(username, 'userEnter', { timestamp });
+                    // Add event first. This now updates aggregates and adds to recentEvents store.
+                    const isNewUser = await userManager.addEvent(username, 'userEnter', { timestamp }); // Added await
 
                     // Log user status (new/existing) before whale check
                     console.log(`User Entered: ${username} (${isNewUser ? 'NEW user' : 'Existing user'})`);
@@ -121,7 +121,7 @@ function processEvent(event) {
 
                     // Perform detailed whale check (logs internally now)
                     const thresholds = configManager.getConfig();
-                    if (userManager.isWhale(username, thresholds)) {
+                    if (await userManager.isWhale(username, thresholds)) { // Added await
                         ui.triggerWhaleNotification(username); // Trigger sound/visuals if whale
                     }
                 }
@@ -131,7 +131,7 @@ function processEvent(event) {
                 const username = object.user?.username;
                 if (username && username !== 'Anonymous') {
                      ui.addLogEntry(`${username} left.`, 'user-leave'); // Changed from 'info' to 'user-leave'
-                    userManager.addEvent(username, 'userLeave', { timestamp });
+                   await userManager.addEvent(username, 'userLeave', { timestamp }); // Added await
                 }
                 break;
             }
@@ -144,7 +144,7 @@ function processEvent(event) {
                          const message = object.tip.message || '';
                          if (!isNaN(amount) && amount > 0) {
                              ui.addLogEntry(`${username} tipped ${amount} tokens.`, 'tip');
-                             userManager.addEvent(username, 'tip', { amount: amount, note: message, timestamp: timestamp });
+                             await userManager.addEvent(username, 'tip', { amount: amount, note: message, timestamp: timestamp }); // Added await
                          } else { console.warn("Skipping tip event with invalid amount:", event); }
                      } else {
                           if (isAnon && object.tip.tokens) {
@@ -169,7 +169,7 @@ function processEvent(event) {
                  const price = object.media?.price ? parseInt(object.media.price, 10) : null;
                  if (username && username !== 'Anonymous' && price !== null && !isNaN(price) && price > 0) {
                      ui.addLogEntry(`${username} purchased '${mediaName}' for ${price} tokens.`, 'media');
-                     userManager.addEvent(username, 'mediaPurchase', { item: mediaName, amount: price, timestamp: timestamp });
+                     await userManager.addEvent(username, 'mediaPurchase', { item: mediaName, amount: price, timestamp: timestamp }); // Added await
                  } else if (username && username !== 'Anonymous') { console.warn("Skipping mediaPurchase event with missing/invalid price:", event); }
                 break;
             }

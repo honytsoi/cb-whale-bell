@@ -37,6 +37,9 @@ async function initApp() {
         // Initialize modules
         await configManager.loadConfig();
         await userManager.loadUsers();
+
+        // Prune old events on startup
+        await dataManager.pruneOldEvents();
         
         // Initialize UI and other components
         ui.initializeUI();

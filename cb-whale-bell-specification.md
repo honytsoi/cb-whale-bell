@@ -1,8 +1,8 @@
-## Chaturbate Whale Bell - Detailed Specification v1.1
+## Chaturbate Whale Bell - Detailed Specification v2.0 (Aggregate & Tiered Retention)
 
 **1. Overview**
 
-Chaturbate Whale Bell is a client-side, static web application designed to alert Chaturbate broadcasters when a potentially high-spending user ("Whale") enters their room. The app leverages historical spending data imported from a Chaturbate `token history.csv` file, processes real-time data from the Chaturbate Events API, and uses broadcaster-defined thresholds to identify these whales. Upon detection of a whale entering the room, the application triggers an audible bell sound. All application state and user data are stored locally in the browser's `localStorage`.
+Chaturbate Whale Bell is a client-side, static web application designed to alert Chaturbate broadcasters when a potentially high-spending user ("Whale") enters their room. The app leverages historical spending data imported from a Chaturbate `token history.csv` file, processes real-time data from the Chaturbate Events API, and uses broadcaster-defined thresholds to identify these whales. Upon detection of a whale entering the room, the application triggers an audible bell sound. **To handle large datasets efficiently, the application stores lifetime aggregate spending data for all users and detailed event history only for a recent, configurable period (e.g., 30 days). All application state and user data are stored locally in the browser's `IndexedDB` database.**
 
 **2. Target Audience**
 
@@ -13,6 +13,8 @@ Chaturbate Broadcasters seeking an audible, real-time notification for the arriv
 *   **HTML5:** Structure of the application.
 *   **CSS3:** Styling the application. (Consider using a simple framework or the existing `main.css` structure).
 *   **JavaScript (ES6+ Modules):** Application logic.
+*   **`Dexie.js`:** Wrapper library for simplified `IndexedDB` access.
+    *   CDN: `https://unpkg.com/dexie@3.2.4/dist/dexie.min.js` (or latest v3)
 *   **`jsQR`:** For scanning the Chaturbate Events API QR code.
     *   CDN: `https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js`
 *   **`PapaParse`:** For robust CSV parsing of token history.
@@ -33,15 +35,21 @@ Chaturbate Broadcasters seeking an audible, real-time notification for the arriv
         *   `amount`: Parse the "Token change" column as a float. Ignore rows with non-positive amounts.
         *   `timestamp`: Parse the "Timestamp" column into an ISO 8601 string (`new Date(row.Timestamp).toISOString()`).
         *   `note`: From the "Note" column (trim whitespace, can be null/empty).
-*   **Processing Logic (Derived from `user-manager.js::importTokenHistory`):**
-    *   **Duplicate Prevention:** Before adding an event from the CSV, check if an event with the *exact same* `username`, `timestamp`, and `amount` already exists in the target user's `eventHistory` in `localStorage`. If it does, skip the CSV row to prevent duplication.
-    *   **Private Show Grouping:**
-        *   Identify potential private/spy show token changes by checking if the `note` contains "Private" or "Spy".
-        *   Group consecutive token changes for the *same user* where the `note` indicates a private/spy show and the time gap between consecutive entries is less than a defined threshold (e.g., 30 seconds).
-        *   For each identified show group, create a single *meta-event* of type `privateShow` or `privateShowSpy`.
-        *   This meta-event should store: `username`, `type` (`privateShow` or `privateShowSpy`), `timestamp` (start time of the show), and `data` containing `startTime`, `endTime`, `duration` (in seconds), `tokens` (total tokens for the show), and crucially `amount` (also total tokens, for consistency with `updateTokenStats`).
-    *   **Regular Tips:** Token changes *not* identified as part of a private/spy show sequence are treated as regular tips. Create events of type `tip` with `username`, `timestamp`, and `data` containing `amount` and `note`.
-    *   **Event Addition:** Add all generated `tip`, `privateShow`, and `privateShowSpy` events to the respective user's data using the core `addEvent` logic (see 4.3). Ensure events are added chronologically based on their original `timestamp`.
+*   **Processing Logic (Refactored in `dataManager.js::processCsvData`):**
+    *   Iterate through each valid row of the CSV data.
+    *   For each row:
+        *   Ensure the user's **aggregate record** exists in memory (using `userManager.addUser`).
+        *   Update the user's **lifetime aggregate stats** (`lifetimeTotalSpent`, `lifetimeTotalTips`, etc.) based on the row's `amount` and derived `eventType`.
+        *   Update the user's `firstSeenDate` and `lastSeenDate` in the aggregate record.
+        *   Check the row's `timestamp` against the configured `recentEventRetentionDays` cutoff.
+        *   If the event timestamp is **within** the retention period:
+            *   Create a detailed event object (containing `username`, `timestamp`, `type`, `amount`, `note`).
+            *   Add this detailed event object to a temporary batch array.
+        *   If the timestamp is older, **do not** store the detailed event (it's already counted in the aggregates).
+    *   Periodically (e.g., after processing a chunk or when the batch is full) or at the end of the import:
+        *   Save the updated **aggregate user data** to the `users` IndexedDB table (using `userManager.saveUsers` or `db.users.bulkPut`).
+        *   Save the batch of **recent detailed events** to the `recentEvents` IndexedDB table (using `db.recentEvents.bulkAdd`).
+    *   **Removed Logic:** Duplicate event checking based on history and private/spy show grouping logic have been removed for performance.
 *   **User Feedback:** Display clear success messages (e.g., "Imported X tokens across Y users.") or specific error messages (e.g., "Missing required columns", "Invalid file format", "Import failed: [error details]") using a dedicated UI element (similar to `#dataManagementResult`). Use the `displayError.js` pattern.
 
 **4.2. Event Feed Connection (Chaturbate Events API)**
@@ -73,74 +81,71 @@ Chaturbate Broadcasters seeking an audible, real-time notification for the arriv
 **4.3. User Data Management (Adaptation of `UserManager`)**
 
 *   **Core Class:** Implement a `UserManager` class (or similar module structure) responsible for managing all user data.
-*   **Storage:**
-    *   Use `localStorage` to persist user data.
-    *   **Key:** Use a specific key like `'whaleBellUsers'`.
-    *   **Format:** Store data as a JSON string representing a Map or an array of `[username, userObject]` pairs: `JSON.stringify(Array.from(this.users.entries()))`.
-*   **User Object Structure (`localStorage`):**
+*   **Storage (IndexedDB via Dexie.js):**
+    *   Use `IndexedDB` for robust storage, managed via the `Dexie.js` library (`db.js`).
+    *   **Database Name:** `WhaleBellDB`
+    *   **Tables (Object Stores):**
+        *   `config`: Stores the main application configuration object (key: `'main'`). Schema: `&id` (primary key).
+        *   `users`: Stores **aggregate user data**. Schema: `&username, lastSeenTimestamp` (primary key `username`, index `lastSeenTimestamp`).
+        *   `recentEvents`: Stores **detailed event information** only for the recent retention period. Schema: `++id, timestamp, username, [username+timestamp]` (auto-incrementing primary key `id`, indexes for pruning and lookups).
+        *   `backups`: Stores a single backup object (key: `'currentBackup'`). Schema: `&id`.
+*   **Aggregate User Object Structure (Stored in `users` table):**
     ```javascript
     {
         username: "string", // Primary key
         firstSeenDate: "string | null", // ISO 8601 timestamp
         lastSeenDate: "string | null", // ISO 8601 timestamp
-        // Deprecate or repurpose: mostRecentlySaidThings: [],
-        // Deprecate: amountTippedTotal, mostRecentTipAmount, mostRecentTipDatetime (use eventHistory/tokenStats instead)
-        // Deprecate: realName, realLocation, preferences, interests, numberOfPrivateShowsTaken (not needed for Whale Bell)
         isOnline: false, // Transient state, reset on load
-        eventHistory: [ // Array of event objects, newest first
-            // {
-            //     username: "string",
-            //     type: "string", // e.g., 'tip', 'userEnter', 'privateShow', 'privateShowSpy', 'mediaPurchase' (if tracked)
-            //     timestamp: "string", // ISO 8601
-            //     data: { // Event-specific data
-            //         note: "string | null",
-            //         amount: "number | null", // Tokens for this specific event
-            //         content: "string | null", // e.g., chat message
-            //         isPrivate: "boolean | null",
-            //         item: "string | null", // e.g., media set name
-            //         // For privateShow/privateShowSpy meta-events:
-            //         duration: "number | null", // seconds
-            //         tokens: "number | null", // total tokens for the show
-            //         startTime: "string | null", // ISO 8601
-            //         endTime: "string | null" // ISO 8601
-            //     }
-            // }
-        ],
-        tokenStats: { // Aggregated stats, calculated from eventHistory
-            username: "string",
-            totalSpent: 0, // Lifetime tokens spent (tips + privates + media)
-            lastUpdated: "string", // ISO 8601 of last calculation
-            // Simplified time periods relevant to Whale Bell:
-            timePeriods: {
-                day7: { tips: 0, privates: 0, media: 0 }, // Example period
-                day30: { tips: 0, privates: 0, media: 0 }, // Example period
-                // Add others as needed or calculate on the fly
-            }
-        },
-        maxHistory: 1000 // Max events to store per user
+        // No eventHistory stored here
+        tokenStats: { // Lifetime aggregate stats
+            username: "string", // Reference
+            lifetimeTotalSpent: 0,
+            lifetimeTotalTips: 0,
+            lifetimeTotalPrivates: 0,
+            lifetimeTotalMedia: 0,
+            lastUpdated: "string | null" // ISO 8601 of last event processed
+        }
+        // No maxHistory
+    }
+    ```
+*   **Recent Event Object Structure (Stored in `recentEvents` table):**
+    ```javascript
+    {
+        id: "number", // Auto-incrementing primary key
+        username: "string", // Foreign key to users table
+        timestamp: "string", // ISO 8601 timestamp (Indexed)
+        type: "string", // e.g., 'tip', 'userEnter', 'privateShow', 'mediaPurchase' (Indexed)
+        amount: "number", // Tokens for this specific event
+        note: "string | null" // Note associated with the event
+        // Other relevant details from original event if needed for queries
     }
     ```
 *   **Core Methods:**
-    *   `addUser(username)`: Adds a new user if they don't exist, initializing with default structure.
-    *   `getUser(username)`: Retrieves a user object.
-    *   `addEvent(username, type, data)`:
-        *   The central method for recording interactions (from CSV or live feed).
-        *   Ensures user exists (calls `addUser` if not).
-        *   Updates `user.firstSeenDate` and `user.lastSeenDate` based on event `timestamp`.
-        *   Creates the event object (including original `timestamp`).
-        *   Adds the event to the *beginning* of `user.eventHistory`.
-        *   Enforces `maxHistory` limit (removes oldest event if exceeded).
-        *   If the event involves tokens (`data.amount`), calls `updateTokenStats`.
-        *   Triggers `debouncedSave`.
-    *   `updateTokenStats(user, event)`: Updates `user.tokenStats.totalSpent` and relevant `timePeriods` based on the event's `type`, `amount`, and `timestamp`.
-    *   `recalculateTotals(user)`: (Optional but recommended) Recalculates all `tokenStats` from the user's full `eventHistory`. Useful after imports or for data integrity checks.
-    *   `getTotalSpent(username)`: Returns `user.tokenStats.totalSpent`.
-    *   `getSpentInPeriod(username, days, category)`: Calculates spending for a category ('tips', 'privates', 'media') within the last `days` by iterating through `eventHistory` (or using pre-calculated `timePeriods`).
-    *   `saveUsers()`: Saves the current state of the `users` Map to `localStorage`.
-    *   `loadUsers()`: Loads user data from `localStorage` on application start. Resets `isOnline` to `false` for all users.
-    *   `debouncedSave()`: Uses `setTimeout` and `clearTimeout` to batch `saveUsers` calls (e.g., 1-second delay).
-    *   `handleStorageError(error)`: If `error.name === 'QuotaExceededError'`, implement pruning: sort users by `lastSeenDate` (oldest first), remove a portion (e.g., 50%) of the oldest users, and retry `saveUsers`.
-    *   **Whale Check Method:** `isWhale(username, thresholds)`: Takes a username and the current threshold settings. Retrieves the user's data. Calculates relevant metrics (lifetime spent, recent tips/privates within configured timeframes) using `getTotalSpent` and `getSpentInPeriod`. Compares metrics against thresholds. Returns `true` if *any* threshold is met, `false` otherwise.
+    *   `addUser(username)`: Adds a new **aggregate user record** to the in-memory map if it doesn't exist, initializing with the default aggregate structure.
+    *   `getUser(username)`: Retrieves an aggregate user object from the in-memory map.
+    *   `addEvent(username, type, data)` **(async)**:
+        *   Ensures aggregate user record exists in memory (calls `addUser`).
+        *   Updates the in-memory user's **aggregate stats** (`lifetimeTotalSpent`, etc.) based on `data.amount` and `type`.
+        *   Updates `user.firstSeenDate` and `user.lastSeenDate`.
+        *   Creates a detailed event record (`username`, `timestamp`, `type`, `amount`, `note`).
+        *   Adds the detailed event record **directly to the `recentEvents` IndexedDB table**.
+        *   Triggers `debouncedSave` for the aggregate user data.
+    *   `updateTokenStats(user, event)`: **Removed.** Aggregate updates happen directly in `addEvent`.
+    *   `recalculateTotals(user)`: **Removed.** Aggregation is live; recalculation from full history is not possible.
+    *   `getTotalSpent(username)`: Returns `user.tokenStats.lifetimeTotalSpent` from the in-memory aggregate record. (Similarly for tips, privates, media).
+    *   `getSpentInPeriod(username, days, category)` **(async)**: Queries the `recentEvents` IndexedDB table for events matching the `username`, `category` (type), and `days` timeframe. Sums the `amount` for matching events. Returns the total.
+    *   `saveUsers()` **(async)**: Saves the current state of the in-memory `users` Map (aggregate data) to the `users` IndexedDB table using `db.users.bulkPut()`.
+    *   `loadUsers()` **(async)**: Loads aggregate user data from the `users` IndexedDB table into the in-memory map on application start. Resets `isOnline` to `false`.
+    *   `debouncedSave()`: Uses `setTimeout` and `clearTimeout` to batch `saveUsers` calls.
+    *   `handleStorageError(error)`: **Removed.** Pruning is now handled by `dataManager.pruneOldEvents` which deletes old records from the `recentEvents` table based on timestamp, not by deleting users. IndexedDB handles quota errors differently than localStorage.
+    *   **Whale Check Method:** `isWhale(username, thresholds)` **(async)**:
+        *   Takes a username and the current threshold settings.
+        *   Retrieves the user's **aggregate data** from the in-memory map (`getUser`).
+        *   Checks lifetime thresholds against the aggregate stats (`lifetimeTotalSpent`, etc.).
+        *   If lifetime thresholds are not met, **queries the `recentEvents` IndexedDB table** for events within the configured `recentTipTimeframe` and `recentPrivateTimeframe`.
+        *   Calculates recent metrics (sum of recent tips, sum of recent privates, check for large single tip) from the queried recent events.
+        *   Compares recent metrics against thresholds.
+        *   Returns `true` if *any* lifetime or recent threshold is met, `false` otherwise.
 
 **4.4. Real-time Event Processing (Adaptation of `app.js::processEvent`)**
 
@@ -148,31 +153,31 @@ Chaturbate Broadcasters seeking an audible, real-time notification for the arriv
     *   Extract `method` and `object`.
     *   **`userEnter`**:
         *   Get `username` from `object.user.username`. Ignore 'Anonymous'.
-        *   Call `userManager.addEvent(username, 'userEnter', { timestamp: event.timestamp })`.
-        *   Call `userManager.markUserOnline(username)` (sets `isOnline: true` and saves).
-        *   **WHALE CHECK:** Call `userManager.isWhale(username, currentThresholds)`.
-        *   If `isWhale` returns `true`, trigger the bell sound notification (see 4.6) and potentially a subtle visual indicator.
+        *   `await userManager.addEvent(username, 'userEnter', { timestamp: event.timestamp })`. (Handles aggregate update and potential recent event storage).
+        *   `userManager.markUserOnline(username)` (Updates in-memory aggregate, save is debounced via `addEvent`).
+        *   **WHALE CHECK:** `if (await userManager.isWhale(username, currentThresholds))` (Await the async check).
+        *   If `true`, trigger the bell sound notification (see 4.6) and potentially a subtle visual indicator.
     *   **`userLeave`**:
         *   Get `username`. Ignore 'Anonymous'.
-        *   Call `userManager.addEvent(username, 'userLeave', { timestamp: event.timestamp })`.
-        *   Call `userManager.markUserOffline(username)` (sets `isOnline: false` and saves).
+        *   `await userManager.addEvent(username, 'userLeave', { timestamp: event.timestamp })`.
+        *   `userManager.markUserOffline(username)` (Updates in-memory aggregate, save is debounced via `addEvent`).
     *   **`tip`**:
         *   Get `username`, `tokens`, `message`, `isAnon` from `object.tip` and `object.user`. Ignore 'Anonymous' if `isAnon` is false.
-        *   Call `userManager.addEvent(username, 'tip', { amount: tokens, note: message, timestamp: event.timestamp })`.
+        *   `await userManager.addEvent(username, 'tip', { amount: tokens, note: message, timestamp: event.timestamp })`.
     *   **`privateMessage`**: (Optional: Track if private messages contribute to spending/whale score)
         *   Get `fromUser`, `messageText`. Ignore 'Anonymous'.
-        *   Call `userManager.addEvent(fromUser, 'privateMessage', { content: messageText, isPrivate: true, timestamp: event.timestamp })`. (Note: `privateMessage` events don't inherently contain token amounts unless custom logic is added).
+        *   `await userManager.addEvent(fromUser, 'privateMessage', { content: messageText, isPrivate: true, timestamp: event.timestamp })`. (Note: `privateMessage` events don't inherently contain token amounts unless custom logic is added).
     *   **`mediaPurchase`**: (Optional: Track if media purchases contribute to spending)
         *   Get `username`, `mediaType`, `mediaName`, *`price`* (if available in the event payload - **verify this**) from `object.user` and `object.media`. Ignore 'Anonymous'.
-        *   Call `userManager.addEvent(username, 'mediaPurchase', { item: mediaName, amount: price, timestamp: event.timestamp })`.
+        *   `await userManager.addEvent(username, 'mediaPurchase', { item: mediaName, amount: price, timestamp: event.timestamp })`.
     *   **Other Events:** Log other events (`broadcastStart`, `broadcastStop`, `follow`, `fanclubJoin`, etc.) to an activity feed/console for debugging, but they don't typically trigger core Whale Bell logic unless configured to do so.
 
 **4.5. Configuration Management (Adaptation of `config.js`)**
 
-*   **Storage:**
-    *   Use `localStorage`.
-    *   **Key:** Use a specific key like `'whaleBellConfig'`.
-    *   **Format:** Store as a JSON string.
+*   **Storage (IndexedDB via Dexie.js):**
+    *   Use the `config` table in the `WhaleBellDB` IndexedDB database.
+    *   **Key:** The single configuration object is stored with `id: 'main'`.
+    *   **Format:** Stored as a JavaScript object.
 *   **Settings Object Structure (`localStorage`):**
     ```javascript
     {
@@ -189,22 +194,23 @@ Chaturbate Broadcasters seeking an audible, real-time notification for the arriv
         totalLifetimeTipsThreshold: 5000, // Example: 50 USD lifetime tips
         // App Settings:
         bellSound: "default_bell.mp3", // Filename/ID of selected sound
+        recentEventRetentionDays: 30, // Default retention period in days
         // Removed: aiModel, promptLanguage, promptDelay, preferences, sessionKey, voice settings
     }
     ```
 *   **UI:**
     *   Provide a dedicated "Settings" section (toggleable, similar to `#configSection`).
-    *   Include input fields (`type="number"`) for all threshold values and timeframes.
-    *   Include a dropdown (`<select>`) for `bellSound`.
+    *   Include input fields (`type="number"`) for all threshold values, timeframes, and `recentEventRetentionDays`.
+    *   Include a button (`<button>`) to test the bell sound (dropdown removed).
     *   Display `#scannedUrl` and `#broadcasterName` (read-only after connection).
     *   Include "Save Configuration" (`#saveConfig`) and "Factory Reset" (`#factoryReset`) buttons.
     *   Include Data Management buttons/options (Export, Import, Password Protection, Merge) as detailed below.
 *   **Functionality:**
-    *   `loadConfig()`: Load settings from `localStorage` on startup. Populate UI fields.
-    *   `saveConfig()`: Read values from UI input fields. Update the settings object. Save to `localStorage`.
+    *   `loadConfig()` **(async)**: Load settings from the `config` table in IndexedDB on startup. Populate UI fields.
+    *   `saveConfig()` **(async)**: Read values from UI input fields. Update the settings object. Save to the `config` table in IndexedDB.
     *   `initConfig()`: Called on startup to load config and set up listeners.
-    *   `clearLocalStorage()`: Implement factory reset to remove `'whaleBellConfig'`, `'whaleBellUsers'`, and `'whaleBellBackup'`.
-    *   **Suggest Thresholds:** Implement a button that analyzes the `tokenStats` (especially `totalSpent`) across all users in `localStorage` (e.g., calculates 75th, 90th, 95th percentiles) and suggests these values for the thresholds, populating the input fields.
+    *   `factoryReset()`: Implement factory reset to clear the `config`, `users`, `recentEvents`, and `backups` tables in IndexedDB after confirmation.
+    *   **Suggest Thresholds (async):** Implement a button that analyzes the aggregate `tokenStats` and queries `recentEvents` (using `await userManager.getSpentInPeriod`) across users to calculate and suggest threshold values, populating the input fields.
 
 **4.6. Whale Notification**
 
@@ -223,9 +229,10 @@ Chaturbate Broadcasters seeking an audible, real-time notification for the arriv
     *   Format into a JSON object:
         ```json
         {
-          "version": "1.1", // Whale Bell specific version
+          "version": "2.0-agg", // Updated version reflecting the refactor
           "timestamp": "ISO 8601 date",
-          "users": [ /* Array of user objects as defined in 4.3 */ ],
+          "users": [ /* Array of AGGREGATE user objects */ ],
+          "recentEvents": [ /* Array of RECENT DETAILED event objects */ ],
           "settings": { /* Settings object as defined in 4.5 */ }
         }
         ```
@@ -237,19 +244,17 @@ Chaturbate Broadcasters seeking an audible, real-time notification for the arriv
     *   Provide an "Import Data" button triggering a file input (`<input type="file" accept=".json">`).
     *   **Password Protection (Optional):** If enabled, prompt for the password. Decrypt using `CryptoJS.AES.decrypt(encryptedData, password).toString(CryptoJS.enc.Utf8)`. Handle decryption errors (likely wrong password).
     *   **Validation:** Use `data-manager.js::isFileSizeValid` (e.g., 10MB limit). Parse the JSON. Use `data-manager.js::validateImportData` (adapting required fields/version for Whale Bell structure).
-    *   **Backup:** Before importing, create a backup of the *current* user and config data using `data-manager.js::createBackup` and save it to `localStorage` under a key like `'whaleBellBackup'`.
-    *   **Merge Option:** Provide a "Merge with existing data" checkbox (`#mergeData`).
-        *   If checked: Use `data-manager.js::mergeUsers` logic to combine imported users with existing users (prioritizing newer data, summing relevant stats where applicable).
-        *   If unchecked (default): Clear existing user data (`userManager.clearAllUsers()`) before importing.
-    *   **Execution:** Iterate through `data.users` and add/update them using `userManager` methods. Update the application config with `data.settings`. Save changes.
+    *   **Backup (async):** Before importing, create a backup of the *current* aggregate users, recent events, and config data using `dataManager.createBackup` and save it to the `backups` table in IndexedDB.
+    *   **Merge Option:** The "Merge with existing data" checkbox (`#mergeData`) is **disabled**. Import always **replaces** existing data.
+    *   **Execution (async):** Clear existing data (`userManager.clearAllUsers`, which clears `users` and `recentEvents` tables). Iterate through `data.users` (aggregates) and add them using `userManager.importUser`. Iterate through `data.recentEvents` and add them using `db.recentEvents.bulkPut`. Update the application config with `data.settings`. Save changes (`userManager.saveUsers`, `configManager.saveConfig`).
     *   Display success/error messages. Reload the page on success to reflect changes cleanly.
-*   **Factory Reset:** Button (`#factoryReset`) that calls `clearLocalStorage()`, removing config, users, and backup keys after confirmation.
+*   **Factory Reset:** Button (`#factoryReset`) that clears all relevant IndexedDB tables (`config`, `users`, `recentEvents`, `backups`) after confirmation.
 
 **5. Non-Functional Requirements**
 
 *   **Performance:** Prioritize efficient calculation of whale metrics, especially `getSpentInPeriod`. Avoid unnecessary loops or recalculations. Debounce saves.
-*   **Storage:** Stay within reasonable `localStorage` limits (generally 5-10MB). Implement pruning (`handleStorageError`).
-*   **Usability:** Simple, clear interface. Minimal clicks required for core operations. Clear status indication. Sensible defaults for thresholds.
+*   **Storage:** Use `IndexedDB` which offers larger storage limits than `localStorage`. Implement pruning of old events from the `recentEvents` table (`dataManager.pruneOldEvents`) based on the configured retention period to manage storage space.
+*   **Usability:** Simple, clear interface. Minimal clicks required for core operations. Clear status indication. Sensible defaults for thresholds and retention period.
 *   **Reliability:** Graceful error handling for API connections, file operations, and data parsing. Automatic reconnection attempts for the event feed.
 *   **Security:** Data is local, but offer optional password encryption for export/import using `CryptoJS`.
 
@@ -262,22 +267,21 @@ Chaturbate Broadcasters seeking an audible, real-time notification for the arriv
 *   **Settings Panel (Initially Hidden):**
     *   **Connection:** QR Scanner (`#qrScanner`, `#startScan`), URL Input (`#scannedUrl`), Connect/Disconnect Button.
     *   **Whale Thresholds:** Number inputs for each threshold (`#lifetimeSpendingThreshold`, `#recentTipThreshold`, etc.) and timeframes (`#recentTipTimeframe`, etc.). "Suggest Thresholds" button.
-    *   **Sound:** Dropdown (`#bellSound`) with sound file options. "Test Sound" button.
-    *   **Data Management:** "Import Token History (.csv)" button, "Export Data (.json)" button, "Import Data (.json)" button. Checkboxes/inputs for password (`#enablePassword`, `#dataPassword`) and merge (`#mergeData`). "Factory Reset" button.
+    *   **Sound:** "Test Sound" button (sound selection removed).
+    *   **Data Management:** "Import Token History (.csv)" button, "Export Data (.json)" button, "Import Data (.json)" button. Checkboxes/inputs for password (`#enablePassword`, `#dataPassword`). **Merge checkbox (`#mergeData`) is present but disabled.** Input for "Recent Event Retention (Days)" (`#recentEventRetentionDays`). "Factory Reset" button.
     *   **Save:** "Save Configuration" button.
     *   **Status/Error Display:** Area (`#dataManagementResult`, `#apiTestResult` - repurposed) for feedback messages.
 *   **Footer:** Link to project page/developer, version info (optional).
 
 **7. Development Considerations**
 
-*   **Modularity:** Structure code into modules (e.g., `config.js`, `userManager.js`, `apiHandler.js`, `ui.js`, `main.js`).
-*   **State Management:** Use a central state object (similar to `appState` and `configState`) to manage application status, connection details, and loaded settings.
+*   **Modularity:** Structure code into modules (e.g., `db.js`, `config.js`, `userManager.js`, `dataManager.js`, `apiHandler.js`, `ui.js`, `main.js`).
+*   **State Management:** Use module-level variables and functions (like `userManager.users` map, `configManager.currentConfig`) to manage application state.
 *   **Code Reuse:** Adapt `UserManager`, `data-manager.js` utilities, `qr-scanner.js`, `displayError.js`, and `config.js` structure heavily.
-*   **Testing:** Manually test with various CSV files, different whale threshold combinations, connection interruptions, and storage limits.
-*   **Dependencies:** Ensure CDN links are correct and libraries load properly. Consider local fallbacks or bundling for production.
-*   **localStorage Keys:** Consistently use distinct keys (`whaleBellUsers`, `whaleBellConfig`, `whaleBellBackup`) to avoid conflicts with other applications or the original Coach app.
+*   **Testing:** Manually test with various CSV files (including large ones), different whale threshold combinations, connection interruptions, import/export, and data pruning. Consider adding automated unit/integration tests.
+*   **Dependencies:** Ensure CDN links (`Dexie.js`, `PapaParse`, `jsQR`, `CryptoJS`) are correct and libraries load properly. Consider local fallbacks or bundling for production.
+*   **IndexedDB:** Use `Dexie.js` for managing the database schema (`db.js`) and interactions. Handle potential database errors gracefully.
 
 **8. Deployment**
 
-This will be deployed using cloudflare Pages and a github workflow.  So when a git commit is pushed to main branch it will be deplooyed to Pages and appear as: https://cb-whale-bell.adult-webcam-faq.com - however the stand alone program can by anybody who wants to clone the repo and serve the files themselves. Readme will including instructions on how to do that and explain clearly that no data is being saved to adult-webcam-faq.com, it is all local on the broadcaster's phone (and therefore if they clear the data on their phone all history is lost and they will have to do the Chaturbate export token_history.csv again)
-
+This will be deployed using cloudflare Pages and a github workflow. So when a git commit is pushed to main branch it will be deployed to Pages and appear as: https://cb-whale-bell.adult-webcam-faq.com - however the stand alone program can by anybody who wants to clone the repo and serve the files themselves. Readme will including instructions on how to do that and explain clearly that no data is being saved to adult-webcam-faq.com, it is all local in the broadcaster's browser **(using IndexedDB)** (and therefore if they clear their browser data for the site, all history is lost and they will have to do the Chaturbate export token_history.csv again).

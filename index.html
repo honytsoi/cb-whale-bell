@@ -112,7 +112,12 @@
                 <input type="password" id="dataPassword" placeholder="Enter password" style="display: none;">
                 <br>
                 <label for="mergeData">Merge with existing data on import:</label>
-                <input type="checkbox" id="mergeData">
+                <input type="checkbox" id="mergeData" disabled> <!-- Disabled as per refactor plan -->
+                <span class="setting-info">(Merge disabled in this version)</span>
+                <br>
+                <label for="recentEventRetentionDays">Recent Event Retention (Days):</label>
+                <input type="number" id="recentEventRetentionDays" value="30" min="1">
+                <span class="setting-info">(How long to keep detailed event history)</span>
                 <br>
                 <button id="factoryReset">Factory Reset</button>
                 <div id="dataManagementResult"></div>

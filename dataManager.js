@@ -8,10 +8,9 @@ import db from './db.js';
 // PapaParse and CryptoJS are assumed to be loaded globally via CDN
 
 const BACKUP_KEY = 'whaleBellBackup';
-const MAX_FILE_SIZE_MB = 10;
-const CURRENT_APP_VERSION = "1.1"; // Matches spec
-const PRIVATE_SHOW_GROUPING_THRESHOLD_SECONDS = 30; // Max time gap for grouping private/spy entries
-
+const MAX_FILE_SIZE_MB = 100; // Increased limit for potentially larger files
+const CURRENT_APP_VERSION = "2.0-agg"; // Update version to reflect major change
+// REMOVED: const PRIVATE_SHOW_GROUPING_THRESHOLD_SECONDS = 30; - Grouping logic removed
 // --- CSV Import ---
 
 export function handleTokenHistoryImport(file) {
@@ -61,280 +60,174 @@ function validateCsvHeaders(headers) {
     return requiredHeaders.every(reqHeader => normalizedHeaders.includes(reqHeader.toLowerCase()));
 }
 
-function processCsvData(data) {
+// Refactored processCsvData for Aggregate & Tiered Retention
+async function processCsvData(data) {
     console.log("Processing CSV data rows:", data.length);
+    ui.displayMessage('Processing CSV rows...', 'info', 'dataManagementResult', 0);
 
-    let importedTokenCount = 0;
-    let processedUserCount = new Set();
-    let eventsAddedCount = 0;
-    let duplicatesSkippedCount = 0;
-    let privateShowsCreated = 0;
-    let spyShowsCreated = 0;
+    let totalRows = data.length;
     let rowsProcessed = 0;
+    let aggregatesUpdatedCount = 0;
+    let recentEventsBatchedCount = 0;
+    let recentEventsBatch = [];
+    const BATCH_SIZE = 500; // How many recent events to add to DB at once
+
+    const config = configManager.getConfig();
+    const retentionDays = config.recentEventRetentionDays || 30;
+    const cutoffTimestamp = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    console.log(`Retention period: ${retentionDays} days. Cutoff: ${new Date(cutoffTimestamp).toISOString()}`);
+
+    // Use a Map to temporarily hold aggregate updates during processing if needed,
+    // but userManager now holds the main state.
+    // let userAggregates = new Map(); // Might not be needed if userManager handles it live
 
     // --- Pre-processing: Group data by user and sort by timestamp ---
     const userData = {};
     
-    // Process rows in chunks to allow UI updates
-    function processChunk(startIndex, chunkSize) {
-        const endIndex = Math.min(startIndex + chunkSize, data.length);
-        
-        for(let i = startIndex; i < endIndex; i++) {
-            const row = data[i];
-            const username = row.User?.trim();
-            const amountStr = row["Token change"];
-            const timestampStr = row.Timestamp;
-            const transactionType = row["Transaction type"]?.trim() || '';
-            const note = row.Note?.trim() || '';
+    // Process data row by row (can still yield to UI)
+    async function processRow(index) {
+        if (index >= totalRows) {
+            await finishCsvProcessing();
+            return;
+        }
 
-            if (!username || !amountStr || !timestampStr) continue;
+        const row = data[index];
+        const username = row.User?.trim();
+        const amountStr = row["Token change"];
+        const timestampStr = row.Timestamp;
+        const transactionType = row["Transaction type"]?.trim() || '';
+        const note = row.Note?.trim() || '';
+
+        rowsProcessed++;
+
+        if (username && amountStr && timestampStr) {
             const amount = parseFloat(amountStr);
-            const timestamp = parseTimestamp(timestampStr);
-            if (isNaN(amount) || amount <= 0 || !timestamp) continue;
+            const timestamp = parseTimestamp(timestampStr); // Returns ISO string or null
+            const eventTime = timestamp ? new Date(timestamp).getTime() : 0;
 
-            if (!userData[username]) userData[username] = [];
-            userData[username].push({ 
-                username, 
-                amount, 
-                timestamp, 
-                transactionType,
-                note, 
-                originalRow: row 
-            });
-            
-            rowsProcessed++;
-            // Update UI every 50 rows
-            if (rowsProcessed % 50 === 0 || rowsProcessed === data.length) {
-                ui.updateImportProgress(rowsProcessed, data.length, {
-                    usersFound: Object.keys(userData).length,
-                    tokensProcessed: importedTokenCount,
-                    privateShowsFound: privateShowsCreated,
-                    spyShowsFound: spyShowsCreated
-                });
-            }
-        }
+            if (timestamp && amount >= 0) { // Process 0 amount events too (like userEnter/Leave if present)
+                const eventType = determineEventType(transactionType);
 
-        // If there are more rows to process, schedule the next chunk
-        if (endIndex < data.length) {
-            setTimeout(() => processChunk(endIndex, chunkSize), 0);
-        } else {
-            // All rows processed, continue with user processing
-            console.log("Initial data grouping complete. Processing users...");
-            processUsers();
-        }
-    }
-
-    function processUsers() {
-        // Sort events for each user
-        for (const username in userData) {
-            userData[username].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-        }
-
-        const usernames = Object.keys(userData);
-        let userIndex = 0;
-
-        function processNextUser() {
-            if (userIndex >= usernames.length) {
-                finishProcessing();
-                return;
-            }
-
-            const username = usernames[userIndex];
-            processedUserCount.add(username);
-            userManager.addUser(username);
-            const existingUser = userManager.getUser(username); // Get the user object AFTER addUser potentially created it
-            const existingEventSignatures = new Set();
-
-            // Log the user object retrieved/created here before passing to processUserEvents
-            console.log(`dataManager.processNextUser: User object for ${username} before processing events:`, JSON.stringify(existingUser, null, 2));
-            if (!existingUser || !existingUser.id) { // Explicitly check for ID presence
-                 console.warn(`dataManager.processNextUser: User object for ${username} is missing 'id' property before calling processUserEvents!`, existingUser);
-            }
-
-
-            if (existingUser?.eventHistory) {
-                existingUser.eventHistory.forEach(event => {
-                    const signature = createEventSignature(event);
-                    if (signature) existingEventSignatures.add(signature);
-                });
-            }
-
-            ui.displayMessage(`Processing user ${userIndex + 1}/${usernames.length}: ${username}...`, 'info', 'dataManagementResult', 0);
-
-            processUserEvents(username, userData[username], existingEventSignatures); // Pass the potentially newly created user object
-            userIndex++;
-            
-            // Update stats for this user
-            const finalUserStats = userManager.getUserStats(username);
-            console.log(`(${username}) Stats after CSV processing & recalc: Spent=${finalUserStats.totalSpent}, Tips=${finalUserStats.totalTips}, Privates=${finalUserStats.totalPrivates}`);
-
-            // Schedule next user processing
-            setTimeout(processNextUser, 0);
-        }
-
-        // Start processing users
-        processNextUser();
-    }
-
-    function processUserEvents(username, events, existingEventSignatures) {
-        let i = 0;
-        while (i < events.length) {
-            const currentEvent = events[i];
-            const isPrivateShow = currentEvent.transactionType === 'Private show';
-            const isSpyShow = currentEvent.transactionType === 'Spy on private show';
-
-            // --- Duplicate Check (raw CSV event) ---
-            const csvEventSignature = `${currentEvent.username}-${currentEvent.timestamp}-${currentEvent.amount.toFixed(2)}`;
-            if (existingEventSignatures.has(csvEventSignature)) {
-                duplicatesSkippedCount++;
-                i++;
-                continue;
-            }
-
-            // --- Private/Spy Show Grouping ---
-            if (isPrivateShow || isSpyShow) {
-                let showGroup = [currentEvent];
-                let showTotal = currentEvent.amount;
-                let j = i + 1;
-
-                while (j < events.length) {
-                    const nextEvent = events[j];
-                    const timeDiffSeconds = (new Date(nextEvent.timestamp).getTime() - new Date(showGroup[showGroup.length - 1].timestamp).getTime()) / 1000;
-
-                    if (timeDiffSeconds >= PRIVATE_SHOW_GROUPING_THRESHOLD_SECONDS) {
-                        break;
-                    }
-
-                    const nextIsPrivate = nextEvent.transactionType === 'Private show';
-                    const nextIsSpy = nextEvent.transactionType === 'Spy on private show';
-                    
-                    if ((isPrivateShow && nextIsPrivate) || (isSpyShow && nextIsSpy)) {
-                        const nextCsvEventSignature = `${nextEvent.username}-${nextEvent.timestamp}-${nextEvent.amount.toFixed(2)}`;
-                        if (existingEventSignatures.has(nextCsvEventSignature)) {
-                            duplicatesSkippedCount++;
-                        } else {
-                            showGroup.push(nextEvent);
-                            showTotal += nextEvent.amount;
-                        }
-                        j++;
-                    } else {
-                        break;
-                    }
-                }
-
-                if (showGroup.length > 0) {
-                    const startTime = showGroup[0].timestamp;
-                    const endTime = showGroup[showGroup.length - 1].timestamp;
-                    const duration = Math.max(0, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 1000);
-                    const showType = isPrivateShow ? 'privateShow' : 'privateShowSpy';
-
-                    const metaEventData = {
-                        timestamp: startTime,
-                        startTime: startTime,
-                        endTime: endTime,
-                        duration: duration,
-                        tokens: showTotal,
-                        amount: showTotal,
-                    };
-
-                    const metaEventSignature = createEventSignature({ type: showType, timestamp: startTime, data: metaEventData });
-                    if (metaEventSignature && existingEventSignatures.has(metaEventSignature)) {
-                        duplicatesSkippedCount++;
-                    } else {
-                        userManager.addEvent(username, showType, metaEventData);
-                        eventsAddedCount++;
-                        importedTokenCount += showTotal;
-                        if (showType === 'privateShow') privateShowsCreated++; else spyShowsCreated++;
-                        if (metaEventSignature) existingEventSignatures.add(metaEventSignature);
-
-                        ui.updateImportProgress(rowsProcessed, data.length, {
-                            usersFound: processedUserCount.size,
-                            tokensProcessed: importedTokenCount,
-                            privateShowsFound: privateShowsCreated,
-                            spyShowsFound: spyShowsCreated
-                        });
-                    }
-
-                    showGroup.forEach(groupedEvent => {
-                        const groupedCsvSignature = `${groupedEvent.username}-${groupedEvent.timestamp}-${groupedEvent.amount.toFixed(2)}`;
-                        existingEventSignatures.add(groupedCsvSignature);
-                    });
-
-                    i = j;
-                    continue;
-                }
-            }
-
-            // --- Regular Tip/Media Processing ---
-            const eventType = determineEventType(currentEvent.transactionType);
-            if (eventType !== 'other') {
-                const eventData = { 
-                    amount: currentEvent.amount, 
-                    note: currentEvent.note, 
-                    timestamp: currentEvent.timestamp,
-                    transactionType: currentEvent.transactionType
+                // 1. Update Aggregates (via userManager.addEvent, which handles aggregates now)
+                // We still call addEvent for *every* row to update first/last seen and aggregates.
+                // addEvent itself will decide whether to store the detailed event.
+                const eventData = {
+                    amount: amount,
+                    note: note,
+                    timestamp: timestamp, // Pass the parsed ISO string
+                    transactionType: transactionType // Pass original type if needed downstream
                 };
-                
-                if (eventType === 'mediaPurchase') {
-                    eventData.item = currentEvent.note || 'Unknown media';
-                }
 
-                const eventSignature = createEventSignature({ type: eventType, timestamp: currentEvent.timestamp, data: eventData });
+                try {
+                    // This updates aggregates in memory AND adds to recentEvents if applicable
+                    // await userManager.addEvent(username, eventType, eventData);
+                    // Correction: userManager.addEvent should ONLY add to recentEvents.
+                    // We need separate logic here for aggregates vs recent.
 
-                if (eventSignature && existingEventSignatures.has(eventSignature)) {
-                    duplicatesSkippedCount++;
-                } else {
-                    // Log the event data and user state before calling userManager.addEvent
-                    console.log(`dataManager.processUserEvents: Processing event for ${username}:`, JSON.stringify(eventData, null, 2));
-                    const currentUserState = userManager.getUser(username); // Get current state right before call
-                    console.log(`dataManager.processUserEvents: User state for ${username} right before addEvent call:`, JSON.stringify(currentUserState, null, 2));
-                     if (!currentUserState || !currentUserState.id) {
-                         console.warn(`dataManager.processUserEvents: User object for ${username} is missing 'id' property right before calling addEvent!`, currentUserState);
-                     }
+                    // --- Aggregate Update ---
+                    userManager.addUser(username); // Ensure user exists in memory
+                    const user = userManager.getUser(username);
+                    if (!user.firstSeenDate || timestamp < user.firstSeenDate) user.firstSeenDate = timestamp;
+                    user.lastSeenDate = timestamp;
+                    user.tokenStats.lastUpdated = timestamp;
 
-                    userManager.addEvent(username, eventType, eventData);
-                    eventsAddedCount++;
-                    importedTokenCount += currentEvent.amount;
-                    if (eventSignature) existingEventSignatures.add(eventSignature);
+                    if (amount > 0) {
+                        user.tokenStats.lifetimeTotalSpent = (user.tokenStats.lifetimeTotalSpent || 0) + amount;
+                        if (eventType === 'tip') user.tokenStats.lifetimeTotalTips = (user.tokenStats.lifetimeTotalTips || 0) + amount;
+                        else if (eventType === 'privateShow' || eventType === 'privateShowSpy') user.tokenStats.lifetimeTotalPrivates = (user.tokenStats.lifetimeTotalPrivates || 0) + amount;
+                        else if (eventType === 'mediaPurchase') user.tokenStats.lifetimeTotalMedia = (user.tokenStats.lifetimeTotalMedia || 0) + amount;
+                        aggregatesUpdatedCount++; // Count rows that potentially changed aggregates
+                    }
+
+
+                    // --- Recent Event Check & Batching ---
+                    if (eventTime >= cutoffTimestamp) {
+                        const recentEventRecord = {
+                            username: username,
+                            timestamp: timestamp,
+                            type: eventType,
+                            amount: amount,
+                            note: note
+                        };
+                        recentEventsBatch.push(recentEventRecord);
+                        recentEventsBatchedCount++;
+
+                        if (recentEventsBatch.length >= BATCH_SIZE) {
+                            await saveRecentEventsBatch();
+                        }
+                    }
+
+                } catch (error) {
+                    console.error(`Error processing row ${index} for user ${username}:`, error, row);
+                    // Optionally skip row or halt import? For now, log and continue.
                 }
             }
-            existingEventSignatures.add(csvEventSignature);
+        }
 
-            i++;
+        // Update UI periodically
+        if (rowsProcessed % 100 === 0 || rowsProcessed === totalRows) {
+            ui.updateImportProgress(rowsProcessed, totalRows, {
+                // usersFound: userManager.getAllUsers().size, // Might be slow
+                aggregatesUpdated: aggregatesUpdatedCount,
+                recentEventsStored: recentEventsBatchedCount - recentEventsBatch.length // Stored = Batched - Remaining in current batch
+            });
+            // Yield to the event loop to keep UI responsive
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        // Process next row
+        await processRow(index + 1);
+    }
+
+    // Helper to save the current batch of recent events
+    async function saveRecentEventsBatch() {
+        if (recentEventsBatch.length === 0) return;
+        try {
+            const batchToSave = [...recentEventsBatch]; // Copy batch
+            recentEventsBatch = []; // Clear original batch immediately
+            await db.recentEvents.bulkAdd(batchToSave);
+            console.log(`Saved batch of ${batchToSave.length} recent events.`);
+        } catch (error) {
+            console.error("Error saving recent events batch:", error);
+            // Handle error - potentially retry or log failed events
+            ui.displayMessage('Error saving batch of recent events. Some data might be missing.', 'error', 'dataManagementResult');
         }
     }
 
-    function finishProcessing() {
-        console.log("Finished detailed user event processing. Final save pending...");
-        userManager.saveUsers();
+    // Function called after all rows are processed
+    async function finishCsvProcessing() {
+        console.log("Finishing CSV processing...");
+        ui.displayMessage('Saving final data...', 'info', 'dataManagementResult', 0);
 
-        // Hide progress UI
+        // Save any remaining recent events
+        await saveRecentEventsBatch();
+
+        // Save the final aggregate user data
+        try {
+            await userManager.saveUsers(); // Ensure final aggregates are saved
+            console.log("Final user aggregates saved.");
+        } catch (error) {
+            console.error("Error saving final user aggregates:", error);
+            ui.displayMessage('Error saving final user aggregates.', 'error', 'dataManagementResult');
+        }
+
         ui.hideImportProgress();
-
-        // Display summary message
-        let summary = `CSV Import Complete: Added ${eventsAddedCount} events (${importedTokenCount.toFixed(0)} tokens) for ${processedUserCount.size} users.`;
-        if (duplicatesSkippedCount > 0) summary += ` Skipped ${duplicatesSkippedCount} duplicate entries.`;
-        if (privateShowsCreated > 0) summary += ` Created ${privateShowsCreated} Private Show groups.`;
-        if (spyShowsCreated > 0) summary += ` Created ${spyShowsCreated} Spy Show groups.`;
+        const finalUserCount = userManager.getAllUsers().size;
+        let summary = `CSV Import Complete: Processed ${rowsProcessed} rows. Updated aggregates for ${finalUserCount} users. Stored ${recentEventsBatchedCount} recent events (within ${retentionDays} days).`;
         ui.displayMessage(summary, 'success', 'dataManagementResult', 15000);
         console.log(summary);
     }
 
-    // Start processing with initial chunk
-    ui.showImportProgress(data.length);
-    processChunk(0, 100); // Process 100 rows at a time
+    // Start processing from the first row
+    ui.showImportProgress(totalRows);
+    await processRow(0);
 }
+// REMOVED: processUsers, processUserEvents - Logic integrated into processRow
+// REMOVED: processChunk - Using async row-by-row processing with yielding instead
 
 // Helper to create a consistent signature for duplicate checking
-function createEventSignature(event) {
-    if (!event || !event.timestamp || !event.type) return null;
-    let amountStr = "0.00";
-    const amountVal = event.data?.amount ?? event.data?.tokens;
-    if (typeof amountVal === 'number') {
-        amountStr = parseFloat(amountVal).toFixed(2);
-    }
-    return `${event.type}-${event.timestamp}-${amountStr}`;
-}
+// REMOVED: createEventSignature - Duplicate checking logic removed/simplified for this refactor.
+// If needed later, it would have to work with the recentEvents store structure.
 
 // Helper to determine event type from transaction type
 function determineEventType(transactionType) {
@@ -354,30 +247,64 @@ function determineEventType(transactionType) {
 
 // --- JSON Export/Import ---
 // ... (Export/Import/Reset/Backup/Validation/Utility functions remain the same) ...
-export function exportData() {
-    console.log("Exporting data...");
+// Refactored exportData for Aggregate & Tiered Retention
+export async function exportData() {
+    console.log("Exporting data (Aggregates + Recent Events)...");
     ui.displayMessage('Preparing data for export...', 'info', 'dataManagementResult', 0);
     try {
-        const usersMap = userManager.getAllUsers();
+        // 1. Get Aggregate User Data
+        const usersMap = userManager.getAllUsers(); // Map of aggregate user objects
         const usersArray = Array.from(usersMap.values());
+
+        // 2. Get Recent Events Data
+        ui.displayMessage('Fetching recent events from database...', 'info', 'dataManagementResult', 0);
+        const recentEventsArray = await db.recentEvents.toArray();
+        console.log(`Fetched ${recentEventsArray.length} recent events for export.`);
+
+        // 3. Get Settings
         const settings = configManager.getConfig();
-        const exportObj = { version: CURRENT_APP_VERSION, timestamp: new Date().toISOString(), users: usersArray, settings: settings };
-        let jsonData = JSON.stringify(exportObj, null, 2);
+
+        // 4. Construct Export Object (New Format)
+        const exportObj = {
+            version: CURRENT_APP_VERSION, // Use updated version
+            timestamp: new Date().toISOString(),
+            users: usersArray, // Contains only aggregate data
+            recentEvents: recentEventsArray, // Contains detailed recent events
+            settings: settings
+        };
+
+        // 5. Stringify and Encrypt (if needed)
+        ui.displayMessage('Formatting data...', 'info', 'dataManagementResult', 0);
+        let jsonData = JSON.stringify(exportObj, null, 2); // Pretty print JSON
         const passwordEnabled = document.getElementById('enablePassword')?.checked;
         const password = document.getElementById('dataPassword')?.value;
         let fileNameSuffix = '';
+        let mimeType = 'application/json';
+
         if (passwordEnabled && password) {
+            ui.displayMessage('Encrypting data...', 'info', 'dataManagementResult', 0);
             jsonData = CryptoJS.AES.encrypt(jsonData, password).toString();
             fileNameSuffix = '-encrypted';
+            mimeType = 'text/plain'; // Encrypted data is just text
             ui.displayMessage('Data encrypted. Starting download...', 'info', 'dataManagementResult');
-        } else { ui.displayMessage('Starting download...', 'info', 'dataManagementResult'); }
-        const blob = new Blob([jsonData], { type: passwordEnabled ? 'text/plain' : 'application/json' });
+        } else {
+            ui.displayMessage('Starting download...', 'info', 'dataManagementResult');
+        }
+
+        // 6. Create Blob and Download Link
+        const blob = new Blob([jsonData], { type: mimeType });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `whale-bell-backup-${new Date().toISOString().split('T')[0]}${fileNameSuffix}.json`;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+        a.download = `whale-bell-backup-${new Date().toISOString().split('T')[0]}${fileNameSuffix}.json`; // Keep .json extension for clarity
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
         ui.displayMessage('Export successful!', 'success', 'dataManagementResult');
+        console.log("Export successful.");
+
     } catch (error) {
         console.error("Error during data export:", error);
         ui.displayMessage(`Export failed: ${error.message}`, 'error', 'dataManagementResult');
@@ -399,7 +326,8 @@ export function handleDataImport(event) {
     event.target.value = '';
 }
 
-function processImportedJson(jsonData) {
+// Refactored processImportedJson for Aggregate & Tiered Retention (REPLACE ONLY)
+async function processImportedJson(jsonData) {
     ui.displayMessage('Processing imported JSON data...', 'info', 'dataManagementResult', 0);
     try {
         let parsedData;
@@ -407,7 +335,8 @@ function processImportedJson(jsonData) {
         const password = document.getElementById('dataPassword')?.value;
 
         // --- Decryption & Parsing ---
-        if (passwordEnabled && !password) { ui.displayMessage('Password needed...', 'error'); return; }
+        // (Keep decryption logic as is)
+        if (passwordEnabled && !password) { ui.displayMessage('Password needed for encrypted file.', 'error', 'dataManagementResult'); return; }
         if (passwordEnabled && password) {
             ui.displayMessage('Decrypting data...', 'info', 'dataManagementResult', 0);
             try {
@@ -437,37 +366,66 @@ function processImportedJson(jsonData) {
              }
         }
 
-        // --- Validation ---
+
+        // --- Validation (Adapt for new format) ---
         if (!validateImportData(parsedData)) { return; } // Validation shows error
 
         // --- Backup ---
-        createBackup();
+        // Keep backup logic as is
+        await createBackup(); // Make backup async
 
-        // --- Merge or Replace ---
-        const merge = document.getElementById('mergeData')?.checked;
-        let importSummary = '';
+        // --- Replace Data (Merge is Disabled) ---
+        const mergeCheckbox = document.getElementById('mergeData');
+        if (mergeCheckbox && mergeCheckbox.checked) {
+             ui.displayMessage('Merge functionality is currently disabled in this version. Importing will REPLACE existing data.', 'warning', 'dataManagementResult', 8000);
+             // Optionally uncheck the box? Or just proceed with replace.
+        }
 
-        if (merge) {
-            console.log("Merging imported data...");
-            ui.displayMessage('Merging imported data... This may take time.', 'info', 'dataManagementResult', 0);
-            importSummary = mergeUsers(parsedData.users); // Call merge function
+        console.log("Replacing existing data with imported data (Aggregates + Recent Events)...");
+        ui.displayMessage('Replacing existing data...', 'info', 'dataManagementResult', 0);
+
+        // Clear existing data (aggregates and recent events)
+        await userManager.clearAllUsers(); // This now clears both tables
+
+        // Import Aggregate Users
+        let importedUserCount = 0;
+        if (parsedData.users && Array.isArray(parsedData.users)) {
+            parsedData.users.forEach(user => {
+                // Use the refactored importUser which handles the aggregate structure
+                userManager.importUser(user);
+                importedUserCount++;
+            });
+            console.log(`Imported ${importedUserCount} user aggregate records.`);
         } else {
-            console.log("Replacing existing data with imported data...");
-            ui.displayMessage('Replacing existing data...', 'info', 'dataManagementResult', 0);
-            userManager.clearAllUsers(); // Clear existing users first
-            parsedData.users.forEach(user => userManager.importUser(user)); // Use importUser method
-            // Recalculate all stats after replacing data
-            userManager.recalculateAllUserStats();
-            importSummary = `Replaced data with ${parsedData.users.length} users from import file.`;
+            console.warn("No 'users' array found in import data or it wasn't an array.");
+        }
+
+        // Import Recent Events
+        let importedEventCount = 0;
+        if (parsedData.recentEvents && Array.isArray(parsedData.recentEvents)) {
+             ui.displayMessage(`Importing ${parsedData.recentEvents.length} recent events...`, 'info', 'dataManagementResult', 0);
+             try {
+                 // Simple bulk put is fine here as we cleared the table
+                 await db.recentEvents.bulkPut(parsedData.recentEvents);
+                 importedEventCount = parsedData.recentEvents.length;
+                 console.log(`Imported ${importedEventCount} recent events.`);
+             } catch (eventImportError) {
+                 console.error("Error importing recent events:", eventImportError);
+                 ui.displayMessage('Error importing recent events. Aggregate data might be imported, but recent history is incomplete.', 'error', 'dataManagementResult');
+                 // Continue with saving aggregates and settings? Or halt? Let's continue for now.
+             }
+        } else {
+            console.warn("No 'recentEvents' array found in import data or it wasn't an array.");
         }
 
         // --- Apply Settings & Save ---
         ui.displayMessage('Applying settings and saving...', 'info', 'dataManagementResult', 0);
-        configManager.updateConfig(parsedData.settings);
-        configManager.saveConfig();
+        configManager.updateConfig(parsedData.settings || {}); // Use empty settings if missing
+        await configManager.saveConfig(); // Make async
         ui.populateSettings(); // Update UI with new settings
-        userManager.saveUsers(); // Final save of potentially modified user data
+        await userManager.saveUsers(); // Save the imported aggregate users
 
+        let importSummary = `Replaced data: Imported ${importedUserCount} users and ${importedEventCount} recent events.`;
         ui.displayMessage(`Import successful! ${importSummary} Reloading application...`, 'success', 'dataManagementResult', 10000);
         console.log(`Import successful! ${importSummary}`);
         setTimeout(() => window.location.reload(), 2000); // Reload for clean state
@@ -480,109 +438,67 @@ function processImportedJson(jsonData) {
 }
 
 // --- Merge Logic ---
-function mergeUsers(importedUsers) {
-    let newUsers = 0;
-    let mergedUsers = 0;
-    let usersProcessed = 0;
-    const totalToProcess = importedUsers.length;
-
-    importedUsers.forEach(importedUser => {
-        usersProcessed++;
-        if (usersProcessed % 50 === 0 || usersProcessed === totalToProcess) { // Update progress
-             ui.displayMessage(`Merging user data: ${usersProcessed}/${totalToProcess}...`, 'info', 'dataManagementResult', 0);
-             console.log(`Merging user data: ${usersProcessed}/${totalToProcess}...`);
-        }
-
-        if (!importedUser || !importedUser.username) {
-            console.warn("Skipping invalid user object during merge:", importedUser);
-            return;
-        }
-
-        const username = importedUser.username;
-        const existingUser = userManager.getUser(username);
-
-        if (existingUser) {
-            // --- Merge Existing User ---
-            mergedUsers++;
-
-            // Merge seen dates
-            if (importedUser.firstSeenDate && (!existingUser.firstSeenDate || importedUser.firstSeenDate < existingUser.firstSeenDate)) {
-                existingUser.firstSeenDate = importedUser.firstSeenDate;
-            }
-            if (importedUser.lastSeenDate && (!existingUser.lastSeenDate || importedUser.lastSeenDate > existingUser.lastSeenDate)) {
-                existingUser.lastSeenDate = importedUser.lastSeenDate;
-            }
-
-            // Merge event history
-            const combinedHistory = [...(existingUser.eventHistory || []), ...(importedUser.eventHistory || [])];
-            const uniqueEventsMap = new Map();
-
-            combinedHistory.forEach(event => {
-                const signature = createEventSignature(event);
-                if (signature && !uniqueEventsMap.has(signature)) {
-                    uniqueEventsMap.set(signature, event);
-                } else if (!signature) {
-                    console.warn("Event without signature during merge:", event);
-                }
-            });
-
-            const mergedUniqueEvents = Array.from(uniqueEventsMap.values());
-            mergedUniqueEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); // Sort newest first
-
-            // Truncate and update history
-            existingUser.eventHistory = mergedUniqueEvents.slice(0, userManager.MAX_HISTORY_PER_USER || 1000);
-
-            // Recalculate stats based on merged history
-            userManager.recalculateTotals(existingUser, false); // Don't save yet
-
-        } else {
-            // --- Add New User ---
-            newUsers++;
-            userManager.importUser(importedUser); // Adds the user via userManager
-             // Recalculate totals for the newly imported user as well
-             userManager.recalculateTotals(userManager.getUser(username), false); // Don't save yet
-        }
-    });
-    // Final save happens after processImportedJson finishes
-    return `Merged data: Added ${newUsers} new users, merged ${mergedUsers} existing users.`;
-}
+// REMOVED: mergeUsers - Merge functionality is disabled for this refactor as per the plan.
+// The complexity of merging aggregates AND recent event lists correctly is high.
 
 
+// Updated validateImportData for the new export format
 function validateImportData(data) {
     if (!data || typeof data !== 'object') {
         ui.displayMessage('Invalid import file format (not an object).', 'error', 'dataManagementResult'); return false;
     }
+
+    // Check version (allow imports from older compatible versions if needed, but warn)
+    // For now, strict check against the new version. Could be relaxed later.
     if (data.version && data.version !== CURRENT_APP_VERSION) {
-        ui.displayMessage(`Warning: Import file version (${data.version}) differs from app version (${CURRENT_APP_VERSION}). Data structure might be incompatible.`, 'info', 'dataManagementResult', 10000);
+        ui.displayMessage(`Warning: Import file version (${data.version}) differs from app version (${CURRENT_APP_VERSION}). Data structure might be incompatible. Proceed with caution.`, 'warning', 'dataManagementResult', 10000);
         console.warn(`Import file version (${data.version}) differs from app version (${CURRENT_APP_VERSION}).`);
+        // Allow import for now, but maybe block in future if versions are known incompatible.
     } else if (!data.version) {
-         ui.displayMessage(`Warning: Import file missing version information. Data structure might be incompatible.`, 'info', 'dataManagementResult', 10000);
+         ui.displayMessage(`Warning: Import file missing version information. Assuming compatible structure, but proceed with caution.`, 'warning', 'dataManagementResult', 10000);
          console.warn(`Import file missing version information.`);
     }
+
+    // Check for essential components of the new format
     if (!Array.isArray(data.users)) {
-         ui.displayMessage('Invalid import data: "users" array is missing or not an array.', 'error', 'dataManagementResult'); return false;
+         ui.displayMessage('Invalid import data: "users" array (for aggregates) is missing or not an array.', 'error', 'dataManagementResult'); return false;
+    }
+    // recentEvents is optional for import (might be an older backup or user chose not to export them)
+    if (data.recentEvents && !Array.isArray(data.recentEvents)) {
+         ui.displayMessage('Invalid import data: "recentEvents" field exists but is not an array.', 'error', 'dataManagementResult'); return false;
     }
      if (typeof data.settings !== 'object' || data.settings === null) {
-        ui.displayMessage('Invalid import data: "settings" object is missing or not an object.', 'error', 'dataManagementResult'); return false;
+        // Allow missing settings, default will be used.
+        console.warn("Import data missing 'settings' object. Default settings will be applied.");
+        // ui.displayMessage('Invalid import data: "settings" object is missing or not an object.', 'error', 'dataManagementResult'); return false;
     }
-    return true;
+    return true; // Passed validation
 }
 
 // --- Backup & Reset ---
 
-function createBackup() {
-    console.log("Creating backup of current data...");
+// Updated createBackup to include recentEvents (make async)
+async function createBackup() {
+    console.log("Creating backup of current data (Aggregates + Recent Events)...");
     try {
         const usersMap = userManager.getAllUsers();
         const usersArray = Array.from(usersMap.values());
+        const recentEventsArray = await db.recentEvents.toArray(); // Fetch events
         const settings = configManager.getConfig();
-        const backupData = { backupTimestamp: new Date().toISOString(), version: CURRENT_APP_VERSION, users: usersArray, settings: settings };
-        saveBackup(backupData);
-        console.log("Backup created successfully.");
+        const backupData = {
+            backupTimestamp: new Date().toISOString(),
+            version: CURRENT_APP_VERSION, // Use current app version for backup
+            users: usersArray,
+            recentEvents: recentEventsArray, // Include recent events
+            settings: settings
+        };
+        await saveBackup(backupData); // saveBackup is already async
+        console.log("Backup created successfully (including recent events).");
         ui.displayMessage('Backup of current data created before import.', 'info', 'dataManagementResult', 5000);
     } catch (error) {
         console.error("Failed to create backup:", error);
         ui.displayMessage('Warning: Failed to create backup before import.', 'error', 'dataManagementResult');
+        // Re-throw? Or just log? For now, just log and show UI message.
     }
 }
 
@@ -628,6 +544,33 @@ export function factoryReset() {
         } else { ui.displayMessage('Factory reset cancelled.', 'info'); }
     } else { ui.displayMessage('Factory reset cancelled.', 'info'); }
 }
+
+// --- Data Pruning ---
+
+export async function pruneOldEvents() {
+    try {
+        const config = configManager.getConfig();
+        const retentionDays = config.recentEventRetentionDays || 30;
+        if (retentionDays <= 0) {
+            console.log("Event pruning skipped: retention period is zero or negative.");
+            return;
+        }
+        const cutoffTimestamp = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+        const cutoffISO = new Date(cutoffTimestamp).toISOString();
+
+        console.log(`Pruning events older than ${retentionDays} days (before ${cutoffISO})...`);
+        const deleteCount = await db.recentEvents.where('timestamp').below(cutoffISO).delete();
+        console.log(`Pruned ${deleteCount} old events.`);
+        if (deleteCount > 0) {
+             ui.addLogEntry(`Pruned ${deleteCount} old events (older than ${retentionDays} days).`, 'info');
+        }
+    } catch (error) {
+        console.error("Error during event pruning:", error);
+        ui.addLogEntry(`Error during event pruning: ${error.message}`, 'error');
+        // Optional: Add UI error message via displayMessage if needed
+    }
+}
+
 
 // --- Utility ---
 

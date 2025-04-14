@@ -236,6 +236,7 @@ Upon successful completion, the application should:
 *   Accurately detect whales based on both lifetime aggregates and recent activity.
 *   Successfully prune old, detailed event data.
 
+** This application is not in product yet, so we can afford to make breaking changes. NO DATA MIGRATION IS REQUIRED. **
 ---
 
 Please review this plan carefully. Let's discuss any questions before you begin implementation. Good luck!
