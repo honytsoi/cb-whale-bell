@@ -29,28 +29,26 @@ let currentConfig = { ...defaultConfig };
 const CONFIG_KEY = 'whaleBellConfig';
 
 export async function loadConfig() {
-    console.log("Loading configuration...");
     try {
+        console.log('Loading configuration...');
         const config = await db.config.get('main');
-        if (!config) {
-            console.log('No saved configuration found, using defaults');
-            currentConfig = { ...defaultConfig };
-        } else {
-            currentConfig = { ...defaultConfig, ...config };
-            console.log("Configuration loaded from IndexedDB:", currentConfig);
+        console.log('Configuration loaded from IndexedDB:', config);
+        
+        if (config) {
+            currentConfig = {...config};
+            return currentConfig;
         }
-        config.showFollows = savedConfig.showFollows ?? defaultConfig.showFollows;
-        ui.populateSettings(); // Update UI fields after loading/setting defaults
+        
+        console.log('No saved configuration found, using defaults');
+        return null;
     } catch (error) {
-        displayError("Failed to load configuration from IndexedDB", error);
-        console.warn("Using default configuration due to loading error.");
-        currentConfig = { ...defaultConfig };
-        try {
-            ui.populateSettings();
-        } catch (uiError) {
-            displayError("Failed to populate UI after config load error", uiError);
-        }
+        console.error('Error loading configuration:', error);
+        return null;
     }
+}
+
+export function getConfig() {
+    return currentConfig || defaultConfig;
 }
 
 export async function saveConfig() {
@@ -65,26 +63,30 @@ export async function saveConfig() {
         currentConfig.recentPrivateTimeframe = parseInt(document.getElementById('recentPrivateTimeframe').value, 10) || defaultConfig.recentPrivateTimeframe;
         currentConfig.totalPrivatesThreshold = parseInt(document.getElementById('totalPrivatesThreshold').value, 10) || defaultConfig.totalPrivatesThreshold;
         currentConfig.totalLifetimeTipsThreshold = parseInt(document.getElementById('totalLifetimeTipsThreshold').value, 10) || defaultConfig.totalLifetimeTipsThreshold;
-        currentConfig.bellSound = document.getElementById('bellSound').value || defaultConfig.bellSound;
-        currentConfig.recentEventRetentionDays = parseInt(document.getElementById('recentEventRetentionDays')?.value, 10) || defaultConfig.recentEventRetentionDays; // Added
+        currentConfig.bellSound = document.getElementById('bellSound')?.value || defaultConfig.bellSound;
+        currentConfig.recentEventRetentionDays = parseInt(document.getElementById('recentEventRetentionDays')?.value, 10) || defaultConfig.recentEventRetentionDays;
+        currentConfig.scannedUrl = document.getElementById('scannedUrl')?.value || null;
+        currentConfig.showFollows = document.getElementById('showFollows')?.checked ?? defaultConfig.showFollows;
+
         // Ensure retention days is at least 1
         if (currentConfig.recentEventRetentionDays < 1) {
-            console.warn(`Retention period cannot be less than 1 day. Setting to 1.`);
+            console.warn('Retention period cannot be less than 1 day. Setting to 1.');
             currentConfig.recentEventRetentionDays = 1;
         }
-        currentConfig.scannedUrl = document.getElementById('scannedUrl')?.value || null;
-        await db.config.put({ id: 'main', ...currentConfig });
-        console.log("Configuration saved:", currentConfig);
-        // Update the read-only display after saving
-        ui.populateSettings();
-    } catch (error) {
-        displayError("Failed to save configuration", error);
-        throw error; // Re-throw for main.js to handle UI message
-    }
-}
 
-export function getConfig() {
-    return JSON.parse(JSON.stringify(currentConfig)); // Deep copy
+        console.log('Saving configuration:', currentConfig);
+        await db.config.put(currentConfig, 'main');
+        
+        // Verify the save
+        const verified = await db.config.get('main');
+        console.log('Verified saved config:', verified);
+        
+        ui.populateSettings(); // Update the read-only display after saving
+        return true;
+    } catch (error) {
+        console.error('Error saving configuration:', error);
+        throw error;
+    }
 }
 
 export function updateConfig(newValues) {

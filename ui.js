@@ -237,7 +237,7 @@ function saveSettingsToLocalStorage() {
         recentTipTimeframe: recentTipTimeframeInput.value,
         recentLargeTipThreshold: recentLargeTipThresholdInput.value,
         recentPrivateThreshold: recentPrivateThresholdInput.value,
-        recentPrivateTimeframe: recentPrivateTimeframeInput.value,
+        recentPrivateTimeframeInput: recentPrivateTimeframeInput.value,
         totalPrivatesThreshold: totalPrivatesThresholdInput.value,
         totalLifetimeTipsThreshold: totalLifetimeTipsThresholdInput.value,
         settingsPanelVisible: settingsPanel.style.display === 'block',
@@ -326,6 +326,26 @@ export function initializeUI() {
             bellSoundLabel.style.display = 'none';
         }
     }
+}
+
+export function showSetupRequired() {
+    const mainContent = document.getElementById('mainContent');
+    const setupRequired = document.getElementById('setupRequired');
+    const settingsPanel = document.getElementById('settingsPanel');
+    
+    if (mainContent) mainContent.style.display = 'none';
+    if (setupRequired) setupRequired.style.display = 'block';
+    if (settingsPanel) settingsPanel.style.display = 'block';
+    
+    displayMessage('Please configure the application settings to continue.', 'info', 'setupMessage');
+}
+
+export function hideSetupRequired() {
+    const mainContent = document.getElementById('mainContent');
+    const setupRequired = document.getElementById('setupRequired');
+    
+    if (mainContent) mainContent.style.display = 'block';
+    if (setupRequired) setupRequired.style.display = 'none';
 }
 
 // In the formatActivity function
