@@ -107,9 +107,12 @@ export async function addEvent(username, type, data) {
         timestamp: timestamp,
         type: type,
         amount: amount,
-        note: eventData.note || ''
-        // Add other relevant details from 'data' if needed for recent queries
-        // e.g., targetUsername for tips if that becomes relevant
+        note: eventData.note || '',
+        // Add follow-specific data
+        followData: type === 'follow' ? {
+            broadcaster: eventData.object?.broadcaster || '',
+            isFollower: eventData.object?.user?.isFollower || false
+        } : undefined
     };
 
     // --- 3. Persist Changes ---

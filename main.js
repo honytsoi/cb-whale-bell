@@ -195,6 +195,23 @@ function addEventListeners() {
 
 }
 
+// In the processEvent function
+async function processEvent(event) {
+    // ...existing code...
+    if (event.method === 'follow' && config.showFollows) {
+        const username = event.object?.user?.username;
+        if (username) {
+            await userManager.addEvent(username, 'follow', {
+                timestamp: event.timestamp,
+                object: event.object
+            });
+            ui.addLogEntry(`${username} followed`, 'follow');
+        }
+        return;
+    }
+    // ...existing code...
+}
+
 // --- Application Start ---
 
 // Wait for the DOM to be fully loaded

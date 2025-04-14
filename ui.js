@@ -182,6 +182,8 @@ export function populateSettings() {
             scannedUrlInput.value = config.scannedUrl || '';
         }
 
+        document.getElementById('showFollows').checked = config.showFollows;
+
         if (currentThresholdsDisplay) {
              currentThresholdsDisplay.innerHTML = `
                 <h3>Current Whale Thresholds</h3>
@@ -323,5 +325,16 @@ export function initializeUI() {
         if (bellSoundLabel) {
             bellSoundLabel.style.display = 'none';
         }
+    }
+}
+
+// In the formatActivity function
+function formatActivity(activity) {
+    // ...existing code...
+    switch (activity.type) {
+        // ...existing cases...
+        case 'follow':
+            return `${timestamp} 👋 ${activity.username} followed`;
+        // ...existing code...
     }
 }

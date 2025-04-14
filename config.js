@@ -22,6 +22,7 @@ const defaultConfig = {
     totalLifetimeTipsThreshold: 5000,
     bellSound: "default_bell.mp3",
     recentEventRetentionDays: 30, // Added: Default retention period in days
+    showFollows: true,
 };
 
 let currentConfig = { ...defaultConfig };
@@ -38,6 +39,7 @@ export async function loadConfig() {
             currentConfig = { ...defaultConfig, ...config };
             console.log("Configuration loaded from IndexedDB:", currentConfig);
         }
+        config.showFollows = savedConfig.showFollows ?? defaultConfig.showFollows;
         ui.populateSettings(); // Update UI fields after loading/setting defaults
     } catch (error) {
         displayError("Failed to load configuration from IndexedDB", error);

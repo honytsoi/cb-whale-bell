@@ -183,6 +183,17 @@ main {
     color: #fd7e14;
 }
 
+#activityLog li.follow {
+    color: #8a2be2;  /* A distinct purple color for follow events */
+    padding: 5px;
+    border-left: 3px solid #8a2be2;
+}
+
+/* Ensure follow events stand out but don't overshadow whale alerts */
+#activityLog li.follow:hover {
+    background-color: rgba(138, 43, 226, 0.1);
+}
+
 #settingsPanel {
     background: rgba(255, 255, 255, 0.95);
     padding: 2rem;
