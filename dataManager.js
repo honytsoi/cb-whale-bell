@@ -131,12 +131,21 @@ async function processCsvData(data) {
                     user.lastSeenDate = timestamp;
                     user.tokenStats.lastUpdated = timestamp;
 
+                    // Log amount parsed from CSV
+                    console.log(`processRow[${index}] (${username}): Parsed amount=${amount}, eventType=${eventType}`);
+
                     if (amount > 0) {
+                        // Log stats BEFORE update
+                        console.log(`processRow[${index}] (${username}): Stats BEFORE:`, JSON.parse(JSON.stringify(user.tokenStats)));
                         user.tokenStats.lifetimeTotalSpent = (user.tokenStats.lifetimeTotalSpent || 0) + amount;
                         if (eventType === 'tip') user.tokenStats.lifetimeTotalTips = (user.tokenStats.lifetimeTotalTips || 0) + amount;
                         else if (eventType === 'privateShow' || eventType === 'privateShowSpy') user.tokenStats.lifetimeTotalPrivates = (user.tokenStats.lifetimeTotalPrivates || 0) + amount;
                         else if (eventType === 'mediaPurchase') user.tokenStats.lifetimeTotalMedia = (user.tokenStats.lifetimeTotalMedia || 0) + amount;
+                        // Log stats AFTER update
+                        console.log(`processRow[${index}] (${username}): Stats AFTER:`, JSON.parse(JSON.stringify(user.tokenStats)));
                         aggregatesUpdatedCount++; // Count rows that potentially changed aggregates
+                    } else {
+                         console.log(`processRow[${index}] (${username}): Skipping aggregation update (amount <= 0)`);
                     }
 
 

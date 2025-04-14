@@ -22,12 +22,16 @@ export async function loadUsers() {
             // Key is username, value is the aggregate user object
             users.set(user.username, user);
         });
-        console.log(`Loaded ${users.size} user aggregates from IndexedDB`);
-    } catch (error) {
+        console.log(`Loaded ${usersArray.length} user aggregates from IndexedDB.`);
+        // Log the tokenStats of the first loaded user specifically
+        if (usersArray.length > 0) {
+            console.log(`loadUsers: Loaded sample user[0].tokenStats=`, JSON.parse(JSON.stringify(usersArray[0]?.tokenStats)));
+        }
+    } catch (error) { // Added closing '}' for try block
         console.error('Error loading users:', error);
         throw error;
     }
-}
+} // Added closing '}' for loadUsers function
 
 // Creates the structure for lifetime aggregate stats
 function createLifetimeTokenStats(username) {
@@ -45,8 +49,14 @@ export async function saveUsers() {
     try {
         // Save the aggregate user data (values from the map)
         const usersArray = Array.from(users.values());
+        // Log the tokenStats of the first user specifically before saving
+        if (usersArray.length > 0) {
+            console.log(`saveUsers: Saving ${usersArray.length} users. Sample user[0].tokenStats=`, JSON.parse(JSON.stringify(usersArray[0]?.tokenStats)));
+        } else {
+            console.log(`saveUsers: No users to save.`);
+        }
         await db.users.bulkPut(usersArray);
-        // console.log(`Saved ${usersArray.length} user aggregates to IndexedDB`); // Less verbose logging
+        // console.log(`Saved ${usersArray.length} user aggregates to IndexedDB`);
     } catch (error) {
         console.error('Error saving user aggregates:', error);
         // Avoid throwing here if possible, maybe retry or log more context
@@ -61,8 +71,10 @@ export async function addEvent(username, type, data) {
     const isNewUser = addUser(username); // Ensures user aggregate record exists in memory
     const user = getUser(username);
     const eventData = data || {};
+    console.log(`addEvent(${username}, ${type}): Received data=`, data); // Log incoming data
     const timestamp = parseTimestamp(eventData.timestamp) || new Date().toISOString();
     const amount = typeof eventData.amount === 'number' ? eventData.amount : 0;
+    console.log(`addEvent(${username}, ${type}): Parsed amount=`, amount); // Log parsed amount
 
     // --- 1. Update In-Memory Aggregates ---
     if (!user.firstSeenDate || timestamp < user.firstSeenDate) {
@@ -356,6 +368,7 @@ export async function getSpentInPeriod(username, days, category = 'total') {
             .where('[username+timestamp]')
             .between([username, startTimeISO], [username, new Date(now).toISOString()], true, true)
             .toArray();
+        console.log(`getSpentInPeriod(${username}, ${days}, ${category}): Found ${recentUserEvents.length} events:`, recentUserEvents); // Log found events
 
         for (const event of recentUserEvents) {
             if (event.amount > 0) {

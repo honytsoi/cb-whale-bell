@@ -8,15 +8,25 @@ db.version(2).stores({
     users: '&username, lastSeenTimestamp', // Store aggregates. Index username (primary key) and lastSeen.
     recentEvents: '++id, timestamp, username, [username+timestamp]', // Auto-incrementing ID, index timestamp (for pruning), index username (for lookups), compound index.
     backups: '&id' // Keep as is (using '&id' assuming 'currentBackup' is the only ID)
-}).upgrade(tx => {
-    // Migration logic might be needed if you want to attempt to preserve
-    // existing *aggregated* data from the old 'users' store.
-    // For simplicity in this refactor, we might initially accept that
-    // users need to re-import after this schema change.
+}).upgrade(async (tx) => { // Make upgrade function async
     console.log("Upgrading DB schema to version 2 for Aggregate/Tiered Retention.");
-    // Dexie automatically handles removal of the old 'events' store as it's not defined in version 2.
-    // If the old 'users' store used 'id' instead of 'username', migration would be needed here.
-    // Example: tx.table('users').clear(); // If starting fresh is acceptable.
+    console.log("Attempting to clear old tables (users, config, backups) to ensure clean upgrade...");
+    try {
+        // Clear tables known to have schema changes or potential conflicts
+        // Need to await these operations within the async upgrade function
+        await tx.table('users').clear();
+        console.log("Cleared 'users' table.");
+        await tx.table('config').clear(); // Clear config as primary key type might differ (&id vs id)
+        console.log("Cleared 'config' table.");
+        await tx.table('backups').clear(); // Clear backups as primary key type might differ (&id vs id)
+        console.log("Cleared 'backups' table.");
+        // The old 'events' table is implicitly dropped by Dexie since it's not in version(2).stores()
+        console.log("Upgrade step completed successfully.");
+    } catch (error) {
+        console.error("Error during table clearing in upgrade transaction:", error);
+        // Re-throw the error to ensure Dexie knows the upgrade failed
+        throw error;
+    }
 });
 
 // Export database instance

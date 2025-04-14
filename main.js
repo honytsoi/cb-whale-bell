@@ -29,26 +29,66 @@ const enablePasswordCheckbox = document.getElementById('enablePassword');
 // --- Initial Setup ---
 
 async function initApp() {
+    let dbOpenedSuccessfully = false;
     try {
-        // Open database connection
+        // Attempt to open the database
+        console.log("Attempting to open IndexedDB...");
         await db.open();
-        console.log('IndexedDB connection established');
-
-        // Initialize modules
-        await configManager.loadConfig();
-        await userManager.loadUsers();
-
-        // Prune old events on startup
-        await dataManager.pruneOldEvents();
-        
-        // Initialize UI and other components
-        ui.initializeUI();
-        apiHandler.initializeAPI();
-        QRScanner.initialize();
-
+        console.log('IndexedDB connection established.');
+        dbOpenedSuccessfully = true;
     } catch (error) {
-        console.error('Failed to initialize application:', error);
-        ui.displayMessage('Failed to initialize application. Please refresh the page.', 'error');
+        console.error('Initial db.open() failed:', error);
+        // Check if it's the specific upgrade error preventing primary key change
+        // Dexie might wrap the error, so check inner errors or message content
+        const errorString = String(error?.inner || error);
+        if (error.name === 'UpgradeError' || errorString.includes("changing primary key")) {
+            console.warn("Database upgrade failed due to schema incompatibility (likely v1 -> v2 primary key change). Deleting and recreating database...");
+            ui.displayMessage("Upgrading database structure (v1->v2). Existing data will be cleared. Please re-import CSV after initialization.", "warning", "dataManagementResult", 15000); // Inform user
+            try {
+                await db.delete();
+                console.log("Old database deleted successfully.");
+                // Retry opening the database, which will now create it fresh with v2 schema
+                console.log("Retrying db.open() to create fresh database...");
+                await db.open();
+                console.log("Fresh IndexedDB connection established with new schema.");
+                dbOpenedSuccessfully = true;
+            } catch (deleteOrReopenError) {
+                console.error("Failed to delete and reopen database after upgrade error:", deleteOrReopenError);
+                ui.displayMessage('CRITICAL ERROR: Failed to recreate database after upgrade attempt. Please clear site data manually and refresh.', 'error');
+                // Prevent further initialization
+                return;
+            }
+        } else {
+            // Handle other potential db.open() errors
+            ui.displayMessage('Failed to open database. Please refresh the page or clear site data.', 'error');
+             // Prevent further initialization
+            return;
+        }
+    }
+
+    // Proceed with initialization only if DB opened successfully
+    if (dbOpenedSuccessfully) {
+        try {
+            console.log("Proceeding with application initialization...");
+            // Initialize modules
+            await configManager.loadConfig(); // Loads config or sets defaults
+            await userManager.loadUsers();    // Loads users (will be empty on fresh DB)
+
+            // Prune old events on startup (will do nothing on fresh DB)
+            await dataManager.pruneOldEvents();
+
+            // Initialize UI and other components
+            ui.initializeUI();
+            apiHandler.initializeAPI();
+            QRScanner.initialize();
+            console.log("Application initialization complete.");
+        } catch (initError) {
+             console.error('Error during application initialization after DB open:', initError);
+             ui.displayMessage('Error initializing application components after DB setup. Please refresh.', 'error');
+        }
+    } else {
+         console.error("Database was not opened successfully. Halting initialization.");
+         // UI message handled in the catch blocks above
     }
 }
 

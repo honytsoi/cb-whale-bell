@@ -5,6 +5,9 @@ import * as userManager from './userManager.js'; // Import userManager to analyz
 import { displayError } from './utils.js';
 import db from './db.js';
 
+// Add this near the top of the file, after imports
+window.whaleBellDebug = {};
+
 // Default configuration
 const defaultConfig = {
     scannedUrl: null,
@@ -104,22 +107,35 @@ export async function resetConfig() {
 
 // Made async because getSpentInPeriod is now async
 export async function suggestThresholds() {
-    console.log("Suggesting thresholds based on user data...");
-    ui.displayMessage("Analyzing user data for suggestions...", "info", "dataManagementResult", 0);
-
+    console.group('Threshold Suggestion Debug');
+    console.log("Starting threshold suggestion process...");
+    
     try {
         const allUsersMap = userManager.getAllUsers();
-        if (allUsersMap.size === 0) {
-            ui.displayMessage("No user data available to generate suggestions.", "info", "dataManagementResult");
-            return;
+        console.log("Total users in map:", allUsersMap.size);
+        
+        // Add more detailed user data logging
+        if (allUsersMap.size > 0) {
+            const sampleUser = Array.from(allUsersMap.values())[0];
+            console.log("First user full data:", {
+                username: sampleUser.username,
+                tokenStats: sampleUser.tokenStats,
+                rawData: sampleUser
+            });
         }
 
         const users = Array.from(allUsersMap.values());
+        
+        // Debug lifetime metrics
+        const lifetimeSpending = users.map(u => {
+            console.log(`User ${u.username} lifetime spent:`, u.tokenStats?.lifetimeTotalSpent);
+            return u.tokenStats?.lifetimeTotalSpent || 0;
+        }).filter(s => s > 0);
 
+        console.log("Lifetime spending values:", lifetimeSpending);
         // --- Calculate Metrics ---
-        const lifetimeSpending = users.map(u => u.tokenStats?.totalSpent || 0).filter(s => s > 0);
-        const lifetimeTips = users.map(u => u.tokenStats?.totalTips || 0).filter(t => t > 0);
-        const lifetimePrivates = users.map(u => u.tokenStats?.totalPrivates || 0).filter(p => p > 0);
+        const lifetimeTips = users.map(u => u.tokenStats?.lifetimeTotalTips || 0).filter(t => t > 0); // Fixed property name
+        const lifetimePrivates = users.map(u => u.tokenStats?.lifetimeTotalPrivates || 0).filter(p => p > 0); // Fixed property name
 
         // Calculate recent spending (e.g., last 7 days) - now requires await
         const recentTipDays = Math.max(1, Math.ceil((currentConfig.recentTipTimeframe || 3600) / 86400)); // Ensure at least 1 day
@@ -131,11 +147,13 @@ export async function suggestThresholds() {
         const recentPrivates = (await Promise.all(recentPrivatesPromises)).filter(p => p > 0);
 
         // --- Calculate Percentiles ---
+        console.log("Data for percentile calculation (after filtering zeros):", {
+            lifetimeSpending, lifetimeTips, lifetimePrivates, recentTips, recentPrivates
+        });
         // Percentiles to calculate (e.g., 75th, 90th, 95th)
         const p75 = 0.75;
         const p90 = 0.90;
         const p95 = 0.95;
-
         const lifetimeSpending_p90 = calculatePercentile(lifetimeSpending, p90);
         const lifetimeTips_p90 = calculatePercentile(lifetimeTips, p90);
         const lifetimePrivates_p90 = calculatePercentile(lifetimePrivates, p90);
@@ -162,9 +180,11 @@ export async function suggestThresholds() {
             recentTips_p75, recentPrivates_p75, largeTipSuggestion
         });
 
+        console.groupEnd();
     } catch (error) {
-        displayError("Failed to suggest thresholds", error);
-        ui.displayMessage(`Error suggesting thresholds: ${error.message}`, "error", "dataManagementResult");
+        console.error("Suggestion process failed:", error);
+        console.groupEnd();
+        throw error;
     }
 }
 
@@ -184,7 +204,36 @@ function calculatePercentile(data, percentile) {
     }
 }
 
+export function debugUserData() {
+    console.group('User Data Debug');
+    const users = userManager.getAllUsers();
+    console.log('Total users:', users.size);
+    
+    // Sample the first few users
+    const sampleUsers = Array.from(users.values()).slice(0, 5);
+    console.log('Sample users:', sampleUsers);
+    
+    // Statistics summary
+    const stats = Array.from(users.values()).reduce((acc, user) => {
+        acc.totalUsers++;
+        if (user.tokenStats?.lifetimeTotalSpent > 0) acc.usersWithSpending++;
+        acc.totalSpent += user.tokenStats?.lifetimeTotalSpent || 0;
+        return acc;
+    }, { totalUsers: 0, usersWithSpending: 0, totalSpent: 0 });
+    
+    console.log('Statistics:', stats);
+    console.groupEnd();
+    return stats;
+}
 
 export function initConfig() {
     loadConfig(); // Load config which also calls ui.populateSettings
 }
+
+// Add this at the bottom of the file
+window.whaleBellDebug = {
+    ...window.whaleBellDebug,
+    suggestThresholds,
+    debugUserData,
+    getCurrentConfig: () => console.log('Current config:', getConfig())
+};
