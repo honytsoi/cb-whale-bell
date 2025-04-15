@@ -29,18 +29,5 @@ db.version(2).stores({
     }
 });
 
-// Add this after your Dexie.exists() check
-db.on('ready', () => {
-    console.log('Database is ready');
-});
-
-db.on('blocked', () => {
-    console.warn('Database blocked - another instance may be running');
-});
-
-db.on('versionchange', (event) => {
-    console.log('Database version changed:', event);
-});
-
 // Export database instance
 export default db;
