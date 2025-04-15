@@ -1,7 +1,7 @@
 // ui.js - Manages UI updates and interactions
 
 import * as configManager from './config.js'; // Import config to get values
-import { displayError } from './utils.js';
+import { displayError, showToastNotification } from './utils.js';
 
 // --- Web Audio API Setup ---
 let audioContext = null;
@@ -10,10 +10,9 @@ try {
     console.log("AudioContext initialized.");
 } catch (e) {
     console.error("Web Audio API is not supported in this browser.", e);
-    displayError("Web Audio API not supported. Sounds disabled.");
+    showToastNotification("Web Audio API not supported. Sounds disabled.", 'error');
 }
 
-// --- DOM Element References ---
 // --- DOM Element References ---
 // Header Elements
 const connectionSwitchCheckbox = document.getElementById('connectionSwitch');
@@ -140,18 +139,24 @@ export function toggleSettingsPanel() {
 }
 
 export function displayMessage(message, type = 'info', elementId = 'dataManagementResult', durationMs = 5000) {
+    // Show toast notification for all messages
+    showToastNotification(message, type);
+    
+    // Also update the specified element if it exists
     const element = document.getElementById(elementId);
     if (element) {
         element.textContent = message;
         element.className = type;
         if (durationMs > 0) {
             setTimeout(() => {
-                if (element.textContent === message) { element.textContent = ''; element.className = ''; }
+                if (element.textContent === message) {
+                    element.textContent = '';
+                    element.className = '';
+                }
             }, durationMs);
         }
     } else {
         console.warn(`UI element with ID "${elementId}" not found for message:`, message);
-        alert(`${type.toUpperCase()}: ${message}`);
     }
 }
 

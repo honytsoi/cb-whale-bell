@@ -37,54 +37,26 @@
         <section id="settingsPanel" style="display: none;">
             <h2>Settings</h2>
 
-            <!-- SECTION 1: API Endpoint Configuration -->
-            <div id="apiEndpointSettings">
-                 <h3>API Endpoint Configuration</h3>
-                 <p class="setting-info">Enter the Events API URL obtained from Chaturbate here. Save configuration, then use the switch in the header to connect.</p>
-                 <button id="startScan">Scan QR Code</button>
-                 <video id="qrScanner" style="display: none; width: 300px;"></video>
-                 <canvas id="qrCanvas" style="display: none;"></canvas>
-                 <button id="cancelScan" style="display: none;">Cancel Scan</button>
-                 <br>
-                 <label for="scannedUrl">Events API URL:</label>
-                 <input type="text" id="scannedUrl" placeholder="Scan QR or paste URL here">
-                 <div id="apiEndpointResult"></div> <!-- Renamed from apiEndpoint -->
-                 <div id="broadcasterNameDisplay"></div>
+            <!-- Step 1: API Endpoint Configuration -->
+            <div class="setup-step">
+                <h3>Step 1: Configure Events API</h3>
+                <button id="startScan">Scan QR Code</button>
+                <video id="qrScanner" style="display: none; width: 300px;"></video>
+                <canvas id="qrCanvas" style="display: none;"></canvas>
+                <button id="cancelScan" style="display: none;">Cancel Scan</button>
+                <br>
+                <label for="scannedUrl">Events API URL:</label>
+                <input type="text" id="scannedUrl" placeholder="Scan QR or paste URL here">
+                <div id="apiEndpointResult"></div>
+                <div id="broadcasterNameDisplay"></div>
             </div>
 
-            <div id="whaleThresholdsSettings">
-                <h3>Whale Thresholds</h3>
-                <label for="lifetimeSpendingThreshold">Lifetime Spending:</label>
-                <input type="number" id="lifetimeSpendingThreshold" value="10000"><br>
-                <label for="recentTipThreshold">Recent Tip Amount:</label>
-                <input type="number" id="recentTipThreshold" value="1000"><br>
-                <label for="recentTipTimeframe">Recent Tip Timeframe (seconds):</label>
-                <input type="number" id="recentTipTimeframe" value="3600"><br>
-                 <label for="recentLargeTipThreshold">Recent Large Tip Amount:</label>
-                <input type="number" id="recentLargeTipThreshold" value="5000"><br>
-                <label for="recentPrivateThreshold">Recent Private Amount:</label>
-                <input type="number" id="recentPrivateThreshold" value="2000"><br>
-                <label for="recentPrivateTimeframe">Recent Private Timeframe (seconds):</label>
-                <input type="number" id="recentPrivateTimeframe" value="86400"><br>
-                <label for="totalPrivatesThreshold">Total Privates Amount:</label>
-                <input type="number" id="totalPrivatesThreshold" value="10000"><br>
-                <label for="totalLifetimeTipsThreshold">Total Lifetime Tips Amount:</label>
-                <input type="number" id="totalLifetimeTipsThreshold" value="5000"><br>
-                <button id="suggestThresholds">Suggest Thresholds</button>
-            </div>
-
-            <div id="soundSettings">
-                <h3>Sound</h3>
-                <label for="bellSound">Bell Sound:</label>
-                <select id="bellSound">
-                    <option value="default_bell.mp3">Default Bell</option>
-                    <!-- Add more sound options here -->
-                </select>
-                <button id="testSound">Test Sound</button>
-            </div>
-
-            <div id="dataManagement">
-                <h3>Data Management</h3>
+            <!-- Step 2: Import History -->
+            <div class="setup-step">
+                <h3>Step 2: Import History (Optional)</h3>
+                <label for="tokenHistoryFile">Import Token History (.csv):</label>
+                <input type="file" id="tokenHistoryFile" accept=".csv" style="display: none;">
+                <button id="importTokenHistoryButton">Import CSV</button>
                 <div id="importProgress" style="display: none;">
                     <div id="importStats">
                         <p>Processing: <span id="currentProgress">0</span> / <span id="totalRows">0</span> rows</p>
@@ -97,40 +69,77 @@
                         <div id="progressBarFill"></div>
                     </div>
                 </div>
-                <label for="tokenHistoryFile">Import Token History (.csv):</label>
-                <input type="file" id="tokenHistoryFile" accept=".csv" style="display: none;">
-                <button id="importTokenHistoryButton">Import CSV</button>
-                <br>
-                <label for="importDataFile">Import Data (.json):</label>
-                <input type="file" id="importDataFile" accept=".json" style="display: none;">
-                <button id="importDataButton">Import JSON</button>
-                <br>
-                <button id="exportDataButton">Export Data (.json)</button>
-                <br>
-                <label for="enablePassword">Enable Password Protection:</label>
-                <input type="checkbox" id="enablePassword">
-                <input type="password" id="dataPassword" placeholder="Enter password" style="display: none;">
-                <br>
-                <label for="mergeData">Merge with existing data on import:</label>
-                <input type="checkbox" id="mergeData" disabled> <!-- Disabled as per refactor plan -->
-                <span class="setting-info">(Merge disabled in this version)</span>
-                <br>
-                <label for="recentEventRetentionDays">Recent Event Retention (Days):</label>
-                <input type="number" id="recentEventRetentionDays" value="30" min="1">
-                <span class="setting-info">(How long to keep detailed event history)</span>
-                <br>
-                <button id="factoryReset">Factory Reset</button>
-                <div id="dataManagementResult"></div>
             </div>
 
-            <div id="followSettings">
-                <h3>Follow Events</h3>
-                <label for="showFollows">Show Follow Events:</label>
-                <input type="checkbox" id="showFollows" checked>
-                <span class="setting-info">(Display when users follow)</span>
+            <!-- Step 3: Set Thresholds -->
+            <div class="setup-step">
+                <h3>Step 3: Set Whale Thresholds</h3>
+                <button id="suggestThresholds">Suggest Thresholds</button>
+                <div id="whaleThresholdsSettings">
+                    <label for="lifetimeSpendingThreshold">Lifetime Spending:</label>
+                    <input type="number" id="lifetimeSpendingThreshold" value="10000"><br>
+                    <label for="recentTipThreshold">Recent Tip Amount:</label>
+                    <input type="number" id="recentTipThreshold" value="1000"><br>
+                    <label for="recentTipTimeframe">Recent Tip Timeframe (seconds):</label>
+                    <input type="number" id="recentTipTimeframe" value="3600"><br>
+                    <label for="recentLargeTipThreshold">Recent Large Tip Amount:</label>
+                    <input type="number" id="recentLargeTipThreshold" value="5000"><br>
+                    <label for="recentPrivateThreshold">Recent Private Amount:</label>
+                    <input type="number" id="recentPrivateThreshold" value="2000"><br>
+                    <label for="recentPrivateTimeframe">Recent Private Timeframe (seconds):</label>
+                    <input type="number" id="recentPrivateTimeframe" value="86400"><br>
+                    <label for="totalPrivatesThreshold">Total Privates Amount:</label>
+                    <input type="number" id="totalPrivatesThreshold" value="10000"><br>
+                    <label for="totalLifetimeTipsThreshold">Total Lifetime Tips Amount:</label>
+                    <input type="number" id="totalLifetimeTipsThreshold" value="5000"><br>
+                </div>
             </div>
 
-            <button id="saveConfig">Save Configuration</button>
+            <button id="saveConfig" class="primary-button">Save Configuration</button>
+
+            <details class="advanced-settings">
+                <summary>Advanced Settings</summary>
+
+                <div id="soundSettings">
+                    <h3>Sound</h3>
+                    <label for="bellSound">Bell Sound:</label>
+                    <select id="bellSound">
+                        <option value="default_bell.mp3">Default Bell</option>
+                    </select>
+                    <button id="testSound">Test Sound</button>
+                </div>
+
+                <div id="dataManagement">
+                    <h3>Data Management</h3>
+                    <label for="importDataFile">Import Data (.json):</label>
+                    <input type="file" id="importDataFile" accept=".json" style="display: none;">
+                    <button id="importDataButton">Import JSON</button>
+                    <br>
+                    <button id="exportDataButton">Export Data (.json)</button>
+                    <br>
+                    <label for="enablePassword">Enable Password Protection:</label>
+                    <input type="checkbox" id="enablePassword">
+                    <input type="password" id="dataPassword" placeholder="Enter password" style="display: none;">
+                    <br>
+                    <label for="mergeData">Merge with existing data on import:</label>
+                    <input type="checkbox" id="mergeData" disabled>
+                    <span class="setting-info">(Merge disabled in this version)</span>
+                    <br>
+                    <label for="recentEventRetentionDays">Recent Event Retention (Days):</label>
+                    <input type="number" id="recentEventRetentionDays" value="30" min="1">
+                    <span class="setting-info">(How long to keep detailed event history)</span>
+                    <br>
+                    <button id="factoryReset">Factory Reset</button>
+                    <div id="dataManagementResult"></div>
+                </div>
+
+                <div id="followSettings">
+                    <h3>Follow Events</h3>
+                    <label for="showFollows">Show Follow Events:</label>
+                    <input type="checkbox" id="showFollows" checked>
+                    <span class="setting-info">(Display when users follow)</span>
+                </div>
+            </details>
         </section>
     </main>
 

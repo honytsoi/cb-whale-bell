@@ -31,15 +31,45 @@ export function debounce(func, wait, immediate = false) {
  */
 export function displayError(message, errorObject = null, elementId = 'connectionToggleStatusText') { // Default to header status text
     console.error(`Error Util: ${message}`, errorObject || '');
-    // Use the UI system instead of alert()
+    // Create and show toast notification
     try {
-        // Try displaying in a specific element, fallback to a generic one if needed
-        ui.displayMessage(`Error: ${message}`, 'error', elementId, 8000); // Show for 8 seconds
+        showToastNotification(`Error: ${message}`, 'error');
+        // Also try displaying in the specified element if it exists
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.textContent = `Error: ${message}`;
+            element.className = 'error';
+            // Clear after 8 seconds
+            setTimeout(() => {
+                if (element.textContent === `Error: ${message}`) {
+                    element.textContent = '';
+                    element.className = '';
+                }
+            }, 8000);
+        }
     } catch (uiError) {
-        // Fallback if ui.displayMessage itself fails (e.g., during init)
-        console.error("Fallback alert because ui.displayMessage failed:", uiError);
-        alert(`Critical Error: ${message}`); // Keep alert as ultimate fallback
+        // If everything fails, log the error but don't show alert
+        console.error("Critical UI Error:", uiError);
     }
+}
+
+/**
+ * Shows a toast notification
+ * @param {string} message The message to show
+ * @param {string} type The type of notification ('error', 'success', 'info')
+ */
+export function showToastNotification(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    // Remove the toast after animation completes (3s)
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.parentElement.removeChild(toast);
+        }
+    }, 3000);
 }
 
 /**
