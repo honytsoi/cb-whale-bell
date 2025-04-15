@@ -32,14 +32,22 @@ export async function loadConfig() {
     console.log("Loading configuration...");
     try {
         const config = await db.config.get('main');
+        console.log("Raw config from IndexedDB:", config);
+        
         if (!config) {
             console.log('No saved configuration found, using defaults');
             currentConfig = { ...defaultConfig };
         } else {
+            console.log("Merging loaded config with defaults...");
             currentConfig = { ...defaultConfig, ...config };
-            console.log("Configuration loaded from IndexedDB:", currentConfig);
+            // Remove the 'id' field that IndexedDB adds as it's not part of our config
+            delete currentConfig.id;
+            console.log("Final merged configuration:", currentConfig);
         }
-        config.showFollows = savedConfig.showFollows ?? defaultConfig.showFollows;
+        
+        // Make sure showFollows has a value
+        currentConfig.showFollows = currentConfig.showFollows ?? defaultConfig.showFollows;
+        
         ui.populateSettings(); // Update UI fields after loading/setting defaults
     } catch (error) {
         displayError("Failed to load configuration from IndexedDB", error);
@@ -109,6 +117,10 @@ export async function resetConfig() {
 
 // Made async because getSpentInPeriod is now async
 export async function suggestThresholds() {
+    const suggestButton = document.getElementById('suggestThresholds');
+    suggestButton.classList.add('loading');
+    ui.displayMessage("Analyzing user data to suggest thresholds...", "info", "dataManagementResult");
+    
     console.group('Threshold Suggestion Debug');
     console.log("Starting threshold suggestion process...");
     
@@ -135,16 +147,19 @@ export async function suggestThresholds() {
         }).filter(s => s > 0);
 
         console.log("Lifetime spending values:", lifetimeSpending);
-        // --- Calculate Metrics ---
-        const lifetimeTips = users.map(u => u.tokenStats?.lifetimeTotalTips || 0).filter(t => t > 0); // Fixed property name
-        const lifetimePrivates = users.map(u => u.tokenStats?.lifetimeTotalPrivates || 0).filter(p => p > 0); // Fixed property name
 
-        // Calculate recent spending (e.g., last 7 days) - now requires await
-        const recentTipDays = Math.max(1, Math.ceil((currentConfig.recentTipTimeframe || 3600) / 86400)); // Ensure at least 1 day
+        // --- Calculate Metrics ---
+        const lifetimeTips = users.map(u => u.tokenStats?.lifetimeTotalTips || 0).filter(t => t > 0);
+        const lifetimePrivates = users.map(u => u.tokenStats?.lifetimeTotalPrivates || 0).filter(p => p > 0);
+
+        const currentConfig = getConfig();
+
+        // Calculate recent spending (e.g., last 7 days)
+        const recentTipDays = Math.max(1, Math.ceil((currentConfig.recentTipTimeframe || 3600) / 86400));
         const recentTipsPromises = users.map(u => userManager.getSpentInPeriod(u.username, recentTipDays, 'tips'));
         const recentTips = (await Promise.all(recentTipsPromises)).filter(t => t > 0);
 
-        const recentPrivateDays = Math.max(1, Math.ceil((currentConfig.recentPrivateTimeframe || 86400) / 86400)); // Ensure at least 1 day
+        const recentPrivateDays = Math.max(1, Math.ceil((currentConfig.recentPrivateTimeframe || 86400) / 86400));
         const recentPrivatesPromises = users.map(u => userManager.getSpentInPeriod(u.username, recentPrivateDays, 'privates'));
         const recentPrivates = (await Promise.all(recentPrivatesPromises)).filter(p => p > 0);
 
@@ -152,23 +167,18 @@ export async function suggestThresholds() {
         console.log("Data for percentile calculation (after filtering zeros):", {
             lifetimeSpending, lifetimeTips, lifetimePrivates, recentTips, recentPrivates
         });
-        // Percentiles to calculate (e.g., 75th, 90th, 95th)
+
         const p75 = 0.75;
         const p90 = 0.90;
         const p95 = 0.95;
         const lifetimeSpending_p90 = calculatePercentile(lifetimeSpending, p90);
         const lifetimeTips_p90 = calculatePercentile(lifetimeTips, p90);
         const lifetimePrivates_p90 = calculatePercentile(lifetimePrivates, p90);
-        const recentTips_p75 = calculatePercentile(recentTips, p75); // Use lower percentile for recent tips?
-        const recentPrivates_p75 = calculatePercentile(recentPrivates, p75); // Use lower percentile for recent privates?
-
-        // Suggest large single tip based on overall tip distribution? (e.g., 95th percentile of all individual tips?)
-        // This requires iterating through event history - potentially slow, skip for now or do simplified version.
-        const largeTipSuggestion = calculatePercentile(lifetimeTips, p95); // Simple approximation
-
+        const recentTips_p75 = calculatePercentile(recentTips, p75);
+        const recentPrivates_p75 = calculatePercentile(recentPrivates, p75);
+        const largeTipSuggestion = calculatePercentile(lifetimeTips, p95);
 
         // --- Populate UI ---
-        // Use Math.ceil to round up suggestions to whole tokens
         document.getElementById('lifetimeSpendingThreshold').value = Math.ceil(lifetimeSpending_p90) || defaultConfig.lifetimeSpendingThreshold;
         document.getElementById('totalLifetimeTipsThreshold').value = Math.ceil(lifetimeTips_p90) || defaultConfig.totalLifetimeTipsThreshold;
         document.getElementById('totalPrivatesThreshold').value = Math.ceil(lifetimePrivates_p90) || defaultConfig.totalPrivatesThreshold;
@@ -176,7 +186,7 @@ export async function suggestThresholds() {
         document.getElementById('recentPrivateThreshold').value = Math.ceil(recentPrivates_p75) || defaultConfig.recentPrivateThreshold;
         document.getElementById('recentLargeTipThreshold').value = Math.ceil(largeTipSuggestion) || defaultConfig.recentLargeTipThreshold;
 
-        ui.displayMessage("Suggested thresholds populated based on user data.", "success", "dataManagementResult");
+        ui.displayMessage("Thresholds updated based on your user data analysis!", "success", "dataManagementResult");
         console.log("Suggestions:", {
             lifetimeSpending_p90, lifetimeTips_p90, lifetimePrivates_p90,
             recentTips_p75, recentPrivates_p75, largeTipSuggestion
@@ -186,7 +196,10 @@ export async function suggestThresholds() {
     } catch (error) {
         console.error("Suggestion process failed:", error);
         console.groupEnd();
+        ui.displayMessage("Failed to suggest thresholds: " + error.message, "error", "dataManagementResult");
         throw error;
+    } finally {
+        suggestButton.classList.remove('loading');
     }
 }
 
