@@ -29,7 +29,7 @@ Follow these steps to get set up:
 3.  **Step 1: Configure Events API**
     *   Scan the QR code provided by Chaturbate for your Events API (requires camera permission) or manually paste the API URL into the input field.
 4.  **Step 2: Import History (Optional)**
-    *   If you want to include past data for lifetime totals and threshold suggestions, import your token history CSV file.
+    *   If you want to include past data for lifetime totals and threshold suggestions, import your token history CSV file. [Guide](https://www.adult-webcam-faq.com/guide/exporting-chaturbate-data/) on exporting your history.
 5.  **Step 3: Set Whale Thresholds**
     *   Configure the token amounts for your whale criteria (Lifetime Spending, Recent Tips, etc.).
     *   Use the "Suggest Thresholds" button to analyze your imported history and get recommendations.
