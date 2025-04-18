@@ -1,75 +1,97 @@
 # CB Whale Bell 🐋
 
-A client-side web application for Chaturbate broadcasters to track and monitor high-value tippers ("whales"). Safely store and analyze your tipping history without sharing sensitive data with third parties.
+A client-side web application for Chaturbate broadcasters to track and monitor high-value tippers ("whales") and other key user activity. Safely store and analyze your tipping history and real-time events without sharing sensitive data with third parties.
 
 ## Features
 
-- **Performance Optimized**: Refactored to handle large tipping histories efficiently.
-- **100% Client-Side**: All data processing and storage happens in your browser.
-- **Secure**: Your data never leaves your device.
-- **Aggregate Tracking**: Stores lifetime spending aggregates for all users.
-- **Recent Event History**: Keeps detailed event history only for a configurable recent period (default 30 days) to save space and improve performance.
-- **Whale Detection**: Identify whales based on lifetime totals and recent activity.
-- **Real-Time Alerts**: Get notified when whales enter your room.
-- **Data Export/Import**: Backup and restore your aggregate data and recent events (Note: JSON format updated in v2.0).
-- **Cross-Browser Compatible**: Works on all modern browsers.
+-   **100% Client-Side & Secure**: All data processing and storage happens *only* in your browser. Your data never leaves your device.
+-   **Tiered Data Storage**: Efficiently stores lifetime spending aggregates (total tips, privates, etc.) for all users in one IndexedDB store, while keeping detailed event history (tips, entries, follows, etc.) only for a configurable recent period (default 30 days) in another store to save space and improve performance.
+-   **Performance Optimized**: Refactored data handling (utilizing IndexedDB and tiered storage) to efficiently manage large tipping histories and event volumes.
+-   **Whale Detection**: Identify users who meet your personalized whale criteria based on lifetime totals and recent activity.
+-   **Real-Time Alerts**: Get instant audible notifications and visible highlights in the activity log when users meeting your whale criteria enter your room.
+-   **Track Follow Events**: See when users follow your channel directly in the real-time activity log.
+-   **Detailed Activity Log**: View recent user entries, follows, tips, media purchases, and more with clear timestamps and event types.
+-   **Automatic Threshold Suggestions**: Analyze your imported history data to recommend personalized whale criteria settings.
+-   **Data Export/Import (v2.1 Format)**: Backup and restore your complete dataset (lifetime aggregates, recent events, and settings) in a secure JSON format. Optional password encryption is available for exports.
+    -   **Important:** Importing data will **REPLACE** all existing data (users, recent events, settings) in the application. Merging data is currently disabled in v2.1.
+-   **Cross-Browser Compatible**: Works on most modern browsers (Chrome, Edge, Firefox, Safari - latest versions recommended). Utilizes the Web Audio API for alert sounds.
 
 ## Live Demo
 
 Try it now: [CB Whale Bell Demo](https://cb-whale-bell.adult-webcam-faq.com/)
 
-## Quick Start
+## Quick Start Guide
 
-1. Visit [CB Whale Bell](https://cb-whale-bell.adult-webcam-faq.com/)
-2. In the Settings, import your tipping data (CSV format).
-3. Configure your whale thresholds and the "Recent Event Retention (Days)" setting. Use automatic suggestions for thresholds if desired.
-4. Save your settings.
-5. Connect to the Events API via the toggle switch in the header.
-6. Start tracking your whales!
+Follow these steps to get set up:
+
+1.  Visit the application: [CB Whale Bell](https://cb-whale-bell.adult-webcam-faq.com/)
+2.  Click the "Settings" button in the header.
+3.  **Step 1: Configure Events API**
+    *   Scan the QR code provided by Chaturbate for your Events API (requires camera permission) or manually paste the API URL into the input field.
+4.  **Step 2: Import History (Optional)**
+    *   If you want to include past data for lifetime totals and threshold suggestions, import your token history CSV file.
+5.  **Step 3: Set Whale Thresholds**
+    *   Configure the token amounts for your whale criteria (Lifetime Spending, Recent Tips, etc.).
+    *   Use the "Suggest Thresholds" button to analyze your imported history and get recommendations.
+6.  In the "Advanced Settings" section, you can adjust the "Recent Event Retention (Days)" to control how long detailed event history is kept.
+7.  Click the "Save Configuration" button at the bottom of the settings panel.
+8.  Close the settings panel.
+9.  Use the **toggle switch** in the header (next to the app title) to connect to the Chaturbate Events API. The switch will turn green and show 'Connected' when successful. (The toggle is disabled until an API URL is saved in settings).
+10. Start tracking your whales and activity!
 
 ## Local Development
 
 ### Prerequisites
 
-- Modern web browser
-- Local web server 
+-   Modern web browser
+-   Local web server (e.g., Python's `http.server`, VS Code Live Server extension, Nginx, Apache) to properly handle modules and other features. Opening `index.html` directly via `file://` URL might not work as expected due to browser security restrictions on local files.
 
 ### Running Locally
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/honytsoi/cb-whale-bell.git
-   cd cb-whale-bell
-   ```
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/honytsoi/cb-whale-bell.git
+    cd cb-whale-bell
+    ```
 
-2. Open `index.html` by serving it through a local web server.
+2.  Serve the directory using a local web server. For example, with Python:
+    ```bash
+    python -m http.server
+    ```
+3.  Open your web browser and navigate to `http://localhost:8000` (or the address/port your server uses).
 
-No build process or dependencies required - it's plain HTML, CSS, and JavaScript!
+No complex build process or external dependencies required locally - it's plain HTML, CSS, and JavaScript! External libraries (jsQR, PapaParse, CryptoJS, Dexie) are loaded via CDN links in `index.html`.
 
 ## Data Privacy
 
-- All data processing happens in your browser.
-- No data is ever sent to any server.
-- **Aggregate user data** (lifetime totals, first/last seen) and **recent detailed events** (e.g., last 30 days, configurable) are stored in your browser's IndexedDB. Older detailed events are automatically pruned.
-- You can clear all stored data anytime through the settings ("Factory Reset").
-- Export your aggregate data and recent events anytime for backup (Note: JSON format updated in v2.0, merge-on-import is disabled).
+-   All data processing and logic runs entirely within your web browser.
+-   No data is ever sent to any server, including the developer's.
+-   **Aggregate user data** (lifetime totals, first/last seen dates) and **recent detailed events** (e.g., last 30 days, configurable) are stored persistently in your browser's IndexedDB database.
+-   Older detailed events are automatically pruned from the IndexedDB based on your "Recent Event Retention" setting to manage browser storage space and maintain performance.
+-   You can clear *all* stored data (users, events, settings) anytime through the settings panel ("Factory Reset").
+-   You can export your data backup anytime, with an optional password encryption layer for added security.
 
 ## Browser Support
 
-- Chrome/Edge (latest)
+-   Most modern browsers are supported. Tested primarily on:
+    -   Chrome (latest)
+    -   Edge (latest)
+-   Likely compatible with recent versions of Firefox and Safari, though minor UI variations may occur.
 
 ## Contributing
 
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
+Contributions are welcome! Please feel free to fork the repository, create a feature branch, commit your changes, and open a Pull Request.
+
+1.  Fork the repository
+2.  Create your feature branch (`git checkout -b my-new-feature`)
+3.  Commit your changes (`git commit -am 'Add some feature'`)
+4.  Push to the branch (`git push origin my-new-feature`)
+5.  Open a Pull Request
 
 ## License
 
-MIT License - feel free to use this project for any purpose.
+[MIT License](LICENSE) - feel free to use this project for any purpose.
 
 ## Support
 
-Create an issue on GitHub if you need help or want to report a bug.
+If you encounter any issues, have questions, or want to suggest improvements, please create an issue on the [GitHub repository](https://github.com/honytsoi/cb-whale-bell/issues).
