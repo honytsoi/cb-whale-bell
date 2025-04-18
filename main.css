@@ -1044,3 +1044,55 @@ footer a:hover {
 @keyframes button-spin {
     to { transform: rotate(360deg); }
 }
+
+/* Toggle Switch Styles for Settings */
+.toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.toggle-checkbox {
+    height: 0;
+    width: 0;
+    visibility: hidden;
+    position: absolute;
+}
+
+.toggle-label {
+    cursor: pointer;
+    text-indent: -9999px;
+    width: 50px;
+    height: 26px;
+    background: grey;
+    display: block;
+    border-radius: 100px;
+    position: relative;
+    transition: background-color 0.3s ease;
+}
+
+.toggle-label:after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 22px;
+    height: 22px;
+    background: #fff;
+    border-radius: 90px;
+    transition: 0.3s ease;
+}
+
+.toggle-checkbox:checked + .toggle-label {
+    background: #FF69B4;
+}
+
+.toggle-checkbox:checked + .toggle-label:after {
+    left: calc(100% - 2px);
+    transform: translateX(-100%);
+}
+
+.toggle-label:active:after {
+    width: 28px;
+}

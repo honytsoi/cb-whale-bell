@@ -109,6 +109,20 @@ async function processEvent(event) { // Marked as async
 
     try {
         switch (method) {
+            case 'follow': {
+                const username = object.user?.username;
+                if (username && username !== 'Anonymous') {
+                    const config = configManager.getConfig();
+                    if (config.showFollows) {
+                        await userManager.addEvent(username, 'follow', {
+                            timestamp,
+                            object: event.object
+                        });
+                        ui.addLogEntry(`${username} followed`, 'follow');
+                    }
+                }
+                break;
+            }
             case 'userEnter': {
                 const username = object.user?.username;
                 if (username && username !== 'Anonymous') {
