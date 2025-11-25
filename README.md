@@ -95,3 +95,4 @@ Contributions are welcome! Please feel free to fork the repository, create a fea
 ## Support
 
 If you encounter any issues, have questions, or want to suggest improvements, please create an issue on the [GitHub repository](https://github.com/honytsoi/cb-whale-bell/issues).
+
